@@ -144,6 +144,24 @@ Custom types: `{ render(value, row), editor(cell) → HTMLElement, parse, format
 
 ## 6. What the grid relies on from the kit (provided by kit 2.21.0)
 
+**Kit 2.21.0 is released:** https://github.com/SACRVM/sacrvm-appkit/releases/tag/v2.21.0
+(vendor `sacrvm-appkit-2.21.0.zip` into `kit/`). What it ships, as built:
+
+- `sac-number-field` and `sac-select` (a searchable combobox with an `options`
+  property or `<option>` children).
+- `size="cell"` on the number, select, date, time, chip-input and color fields.
+- In a cell, **Enter** fires `sac:commit` `{ value, shiftKey }`: the field
+  commits, and Shift tells the grid to move up.
+- **Esc** restores the value the field had on focus and fires `sac:cancel`.
+- An open popover takes Enter/Esc first.
+- **Tab** commits and passes through (no `sac:commit`).
+- `focus({ select })`; `--cell-padding-inline` (default 8px).
+- A `.cell-input` CSS recipe for plain text cells, where the host handles the
+  keys.
+- `sac.regional.number` (`"1,234.5" | "1.234,5" | "1 234,5" | "1'234.5"`),
+  plus `formatNumber()`, `parseNumber()` and `separators()`.
+- Docs: the kit's style guide → Components → "Cell editors".
+
 - **The cell-editor contract** every field above implements in
   `size="cell"`: borderless, fills its cell, no label; `value` get/set;
   `focus({ select })`; `sac:change` on commit; it lets **Tab** and
