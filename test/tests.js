@@ -782,4 +782,18 @@ module.exports = function ({ test, eq, ok, center }) {
         await settle(p);
         eq(await p.eval("fx.grid.mode"), "form");
     });
+    test("form: Tab reaches every field, kit fields included", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        const hosts = [];
+        for (let i = 0; i < 10; i++) {
+            await p.key("Tab");
+            hosts.push(await p.eval("document.activeElement.localName"));
+        }
+        await p.key("Escape");
+        eq(hosts, ["sac-number-field", "sac-date-field", "sac-time-field", "sac-date-field", "sac-time-field",
+            "input", "sac-select", "sac-chip-input", "sac-color-field", "textarea"]);
+    });
 };

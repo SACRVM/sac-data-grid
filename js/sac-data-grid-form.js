@@ -313,6 +313,17 @@
             plain(false);
         }
         if (ro) f.get = null;
+        // sac-dialog's focus trap only cycles native focusables, so Tab would
+        // skip the kit fields. A tabindex puts them in its list; the trap
+        // focuses them through their own focus() (the inner input). Remove
+        // once the kit's trap sees custom elements.
+        for (const k of wrap.querySelectorAll("*")) {
+            if (!k.localName.startsWith("sac-") || k.localName === "sac-icon" || k.hasAttribute("disabled")) continue;
+            k.tabIndex = 0;
+            k.addEventListener("focus", (e) => {
+                if (e.target === k && !(k.shadowRoot && k.shadowRoot.activeElement)) k.focus();
+            });
+        }
         const err = document.createElement("div");
         err.className = "sdg-err";
         err.id = id + "-err";
