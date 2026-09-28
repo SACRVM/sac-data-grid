@@ -54,6 +54,16 @@
     let source;
     if (kind === "array") {
         source = SacDataGrid.arraySource(data, { key: "id" });
+        const save = source.save.bind(source), remove = source.remove.bind(source);
+        source.save = (changes) => {
+            log.push(["save", JSON.parse(JSON.stringify(changes))]);
+            if (params.get("save-error")) {
+                return Promise.resolve({ saved: [], errors: changes.map((c) => ({ id: c.id, field: Object.keys(c.fields)[0], message: "Server says no" })) });
+            }
+            return save(changes);
+        };
+        source.remove = (ids) => { log.push(["remove", ids.slice()]); return remove(ids); };
+        if (params.get("create") !== "1") delete source.create;
     } else {
         const inner = SacDataGrid.arraySource(data, { key: "id", pageSize: 50 });
         let calls = 0;

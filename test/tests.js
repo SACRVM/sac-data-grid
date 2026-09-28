@@ -46,9 +46,8 @@ module.exports = function ({ test, eq, ok, center }) {
         const perf = await p.eval("fx.scrollPerf(60)");
         ok(perf.p95 < 12, `scroll frame p95 ${perf.p95.toFixed(2)} ms (mean ${perf.mean.toFixed(2)}, max ${perf.max.toFixed(2)})`);
         const rows = await p.eval("fx.renderedRows()");
-        const last = rows[rows.length - 1];
-        eq(await p.eval(`fx.cell(${last}, 0)`), String(last + 1), "last rendered row shows its data");
-        eq(last, 99999, "scrolled to the end");
+        eq(rows[rows.length - 1], 100000, "scrolled to the end (the new-row line)");
+        eq(await p.eval("fx.cell(99999, 0)"), "100000", "last data row shows its data");
     });
 
     test("frozen columns stay put while scrolling sideways", async (p) => {
@@ -127,7 +126,10 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.eval("fx.focusGrid()");
         await p.key("End", ["Control"]);
         await p.key("Tab");
-        eq(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), false, "focus moved on");
+        eq((await p.eval("fx.state()")).cur, { r: 3, c: 0 }, "tab goes on to the new-row line");
+        await p.key("End");
+        await p.key("Tab");
+        eq(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), false, "then leaves the grid");
     });
 
     /* ---------------------------------------------------------------- mouse -- */
@@ -368,5 +370,250 @@ module.exports = function ({ test, eq, ok, center }) {
             };
         })()`);
         eq(a, { role: "grid", rowcount: "42", colcount: "15", rowindex: "4", colindex: "5", cellRole: "gridcell", tab: 0 });
+    });
+
+    /* ------------------------------------------------------------- editing -- */
+
+    const settle = (p) => p.eval("fx.ready()");
+    const saves = (p) => p.eval("fx.log.filter(l => l[0] === 'save').map(l => l[1])");
+
+    test("edit a text cell: Enter keeps, typing replaces, Esc cancels", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'w1')");
+        await p.key("Enter");
+        ok((await p.eval("fx.state()")).editing, "editing");
+        eq(await p.eval("fx.activeTag()"), "input.cell-input", "plain input focused");
+        await p.type("X");
+        await p.key("Enter");
+        await settle(p);
+        let s = await p.eval("fx.state()");
+        eq([s.editing, s.cur], [false, { r: 3, c: 11 }], "committed, moved down");
+        eq(await p.eval("fx.cell(2, 11)"), "wide 2X");
+        eq(await p.eval("fx.events.filter(e => e.type === 'sac:change').map(e => e.detail)"),
+            [{ id: 3, field: "w1", value: "wide 2X", old: "wide 2" }], "sac:change");
+        eq(await p.eval("fx.data[2].w1"), "wide 2X", "row mode saved on leaving the row");
+        eq(await p.eval("fx.grid.dirty"), 0);
+        await p.type("Qrs");
+        ok((await p.eval("fx.state()")).editing, "typing starts editing");
+        await p.key("Tab");
+        await settle(p);
+        eq(await p.eval("fx.cell(3, 11)"), "Qrs", "typing replaced the value");
+        eq((await p.eval("fx.state()")).cur, { r: 3, c: 12 }, "tab moved right");
+        await p.type("Z");
+        await p.key("Escape");
+        await settle(p);
+        eq(await p.eval("fx.cell(3, 12)"), "wider 3", "escape cancelled");
+        eq((await p.eval("fx.state()")).editing, false);
+        ok(await p.eval("fx.focusGrid()"), "focus back on the grid");
+    });
+
+    test("kit cell editors: number, date, select, bool", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'n')");
+        await p.type("42");
+        eq(await p.eval("fx.activeTag()"), "input.num", "sac-number-field");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.cell(0, 2)"), "42.0", "number");
+        eq((await p.eval("fx.state()")).cur, { r: 1, c: 2 }, "enter moved down");
+        await p.eval("fx.grid.focusCell(1, 'd')");
+        await p.type("2026-05-06");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.cell(0, 3)"), "2026-05-06", "date");
+        await p.eval("fx.grid.focusCell(1, 's')");
+        await p.type("Gam");
+        await p.key("Enter");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.cell(0, 7)"), "Gamma", "select");
+        await p.eval("fx.grid.focusCell(1, 'b')");
+        await p.key(" ");
+        await settle(p);
+        eq(await p.eval("fx.grid._get(fx.data[0], fx.grid._cols[6])"), false, "space toggled the bool");
+        eq(await saves(p), [], "batch mode: nothing sent yet");
+        eq(await p.eval("fx.grid.dirty"), 1);
+        ok((await p.eval("fx.status()")).includes("1 unsaved row"), "status: unsaved");
+        await p.eval("fx.grid.save()");
+        await settle(p);
+        eq((await saves(p))[0][0].fields, { n: 42, d: "2026-05-06", s: "c", b: false }, "one update with every field");
+        eq(await p.eval("fx.grid.dirty"), 0);
+        eq(await p.eval("fx.data[0].n"), 42);
+    });
+
+    test("datetime and longtext editors", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'dt')");
+        await p.key("Enter");
+        eq(await p.eval("fx.activeTag()"), "input.date", "date half");
+        await p.key("Tab");
+        ok((await p.eval("fx.state()")).editing, "tab stays inside the pair");
+        ok((await p.eval("fx.activeTag()")).startsWith("input.seg"), "time half");
+        await p.type("0930");
+        await p.key("Tab");
+        await settle(p);
+        eq(await p.eval("fx.grid._get(fx.data[1], fx.grid._cols[5])"), "2026-02-02T09:30", "datetime");
+        await p.eval("fx.grid.focusCell(2, 'note')");
+        await p.key("Enter");
+        ok(await p.eval("!!fx.grid.shadowRoot.querySelector('.long-pop:popover-open')"), "popover textarea");
+        await p.type("A");
+        await p.key("Enter");
+        await p.type("B");
+        ok((await p.eval("fx.state()")).editing, "enter is a new line");
+        await p.key("Enter", ["Control"]);
+        await settle(p);
+        eq(await p.eval("fx.grid._get(fx.data[1], fx.grid._cols[10])"), "note 1A\nB", "ctrl+enter commits");
+        eq(await p.eval("fx.cell(1, 10)"), "note 1A …", "first line shown");
+    });
+
+    test("delete clears the range; undo and redo", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.key("ArrowDown", ["Shift"]);
+        await p.key("ArrowRight", ["Shift"]);
+        await p.key("Delete");
+        await settle(p);
+        eq(await p.eval("[fx.cell(0, 11), fx.cell(1, 12)]"), ["", ""], "cleared");
+        eq(await p.eval("fx.grid.dirty"), 2);
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await p.eval("[fx.cell(0, 11), fx.cell(1, 12)]"), ["wide 0", "wider 1"], "undone");
+        eq(await p.eval("fx.grid.dirty"), 0, "back to saved values: not dirty");
+        await p.key("y", ["Control"]);
+        await settle(p);
+        eq(await p.eval("fx.cell(0, 11)"), "", "redone");
+        await p.eval("fx.grid.revert()");
+        await settle(p);
+        eq(await p.eval("[fx.cell(0, 11), fx.grid.dirty]"), ["wide 0", 0], "revert");
+    });
+
+    test("required and validate mark cells; invalid rows are held back", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Delete");
+        await settle(p);
+        ok(await p.eval("fx.cellEl(1, 1).classList.contains('invalid')"), "marked invalid");
+        eq(await p.eval("fx.cellEl(1, 1).title"), "Required");
+        eq(await p.eval("fx.cellEl(1, 1).getAttribute('aria-invalid')"), "true");
+        await p.key("ArrowDown");
+        await settle(p);
+        eq(await saves(p), [], "not sent");
+        ok((await p.eval("fx.status()")).includes("1 row with errors"), "status");
+        await p.eval("fx.grid.focusCell(5, 'n')");
+        await p.type("-5");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.cellEl(4, 2).title"), "negative", "validate()");
+        await p.key("z", ["Control"]);
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await p.eval("[fx.cellEl(1, 1).classList.contains('invalid'), fx.grid.dirty]"), [false, 0], "undo clears it");
+    });
+
+    test("save errors from the source keep cells dirty and marked", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-error=1");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");
+        await p.type("oops");
+        await p.key("Enter");
+        await settle(p);
+        eq((await saves(p)).length, 1, "sent");
+        eq(await p.eval("fx.cellEl(0, 12).title"), "Server says no");
+        eq(await p.eval("fx.grid.dirty"), 1, "still dirty");
+        const ev = await p.eval("fx.events.filter(e => e.type === 'sac:save').map(e => e.detail.errors.length)");
+        eq(ev, [1], "sac:save carries the errors");
+    });
+
+    test("cell save mode saves every commit", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=cell");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.type("a");
+        await p.key("Tab");
+        await p.type("b");
+        await p.key("Tab");
+        await settle(p);
+        eq((await saves(p)).map((s) => s.map((c) => c.fields)), [[{ w1: "a" }], [{ w2: "b" }]]);
+    });
+
+    test("new row line: type to add, saved when leaving it", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        await p.eval("fx.focusGrid()");
+        await p.key("End", ["Control"]);
+        await p.key("ArrowDown");
+        await p.key("Home");
+        await p.key("ArrowRight");
+        eq((await p.eval("fx.state()")).cur, { r: 5, c: 1 }, "on the new-row line");
+        eq(await p.eval("fx.cell(5, 1)"), "New row");
+        await p.type("Neo");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("[fx.data.length, fx.data[5].name, fx.data[5].id]"), [6, "Neo", 6], "created at the source");
+        eq((await saves(p))[0][0].op, "create");
+        eq(await p.eval("fx.cell(5, 0)"), "6", "real id shown");
+        eq(await p.eval("fx.grid.dirty"), 0);
+        eq((await p.eval("fx.state()")).cur, { r: 6, c: 1 }, "enter moved onto the new-row line");
+        await p.type("x");
+        await p.key("Escape");
+        await p.key("ArrowUp");
+        await settle(p);
+        eq((await p.eval("fx.state()")).rows, 6, "an untouched new row goes away");
+        await p.eval("fx.grid.addRow({ name: 'Api' })");
+        await settle(p);
+        eq((await p.eval("fx.state()")).cur.r, 6, "addRow moves the cursor");
+        eq(await p.eval("fx.cell(6, 1)"), "Api");
+    });
+
+    test("delete rows: request-delete, undo, removal after the toast", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'name')");
+        await p.key("ArrowDown", ["Shift"]);
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        await p.eval(`fx.grid._menu.querySelector('[data-action="delete-rows"]').click()`);
+        await settle(p);
+        eq(await p.eval("fx.events.filter(e => e.type === 'sac:request-delete').map(e => e.detail.ids)"), [[3, 4]]);
+        ok(await p.eval("fx.cellEl(2, 1).parentElement.classList.contains('deleted')"), "marked");
+        await p.eval("fx.focusGrid()");
+        await p.key("z", ["Control"]);
+        await settle(p);
+        ok(!(await p.eval("fx.cellEl(2, 1).parentElement.classList.contains('deleted')")), "undone");
+        await p.eval("fx.grid.addEventListener('sac:request-delete', e => { if (window.block) e.preventDefault(); }); window.block = true");
+        await p.eval("fx.grid.focusCell(6, 'name'); fx.grid._deleteRows([5])");
+        await settle(p);
+        ok(!(await p.eval("fx.cellEl(5, 1).parentElement.classList.contains('deleted')")), "cancelable");
+        await p.eval("window.block = false; fx.grid._deleteRows([5])");
+        await p.eval("fx.grid._undo[fx.grid._undo.length - 1].toast.dismiss()");
+        await p.eval("new Promise(r => setTimeout(r, 50))");
+        await settle(p);
+        eq(await p.eval("[fx.source.rows.length, fx.state().rows]"), [9, 9], "removed after the toast");
+        eq(await p.eval("fx.log.filter(l => l[0] === 'remove').map(l => l[1])"), [[6]], "via source.remove");
+    });
+
+    test("read mode has no editing affordances", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=read");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.type("x");
+        await p.key("Delete");
+        await p.key(" ");
+        await settle(p);
+        eq([(await p.eval("fx.state()")).editing, await p.eval("fx.grid.dirty"), await p.eval("fx.cell(0, 1)")], [false, 0, "Anna 1"]);
+        eq(await p.eval("fx.grid._scroller.getAttribute('aria-readonly')"), "true");
+        eq((await p.eval("fx.state()")).rows, 5, "no new-row line");
+        await p.eval("fx.grid.mode = 'sheet'");
+        await settle(p);
+        eq(await p.eval("fx.cell(5, 1)"), "New row", "switching mode at runtime");
+    });
+
+    test("the editor survives scrolling away", async (p) => {
+        await p.load("/test/fixture.html?rows=5000");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.type("far");
+        await p.eval("fx.grid._scroller.scrollTop = 50000");
+        await settle(p);
+        ok((await p.eval("fx.state()")).editing, "still editing");
+        eq(await p.eval("fx.grid._editor.el.isConnected"), true);
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.data[0].w1"), "far");
     });
 };

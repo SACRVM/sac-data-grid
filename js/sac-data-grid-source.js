@@ -178,7 +178,7 @@
                         saved.push(ch.id);
                     } else if (ch.op === "create") {
                         const row = Object.assign({}, ch.row || {}, ch.fields || {});
-                        if (row[key] == null || map.has(row[key])) row[key] = newId(row);
+                        if (row[key] == null || ch.temp || map.has(row[key])) row[key] = newId(row);
                         data.push(row);
                         touch();
                         saved.push(ch.id);
@@ -204,9 +204,9 @@
 
             remove(ids) {
                 const set = new Set(ids || []);
-                const before = data.length;
-                data = data.filter((row) => !set.has(row[key]));
-                if (data.length !== before) touch();
+                let w = 0;
+                for (const row of data) if (!set.has(row[key])) data[w++] = row;   // in place: src.rows stays the live array
+                if (w !== data.length) { data.length = w; touch(); }
                 return Promise.resolve({ removed: [...set], errors: [] });
             },
         };

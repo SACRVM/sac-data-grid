@@ -21,6 +21,7 @@ Zero build: plain files, the kit vendored in `kit/` (≥ 2.21.0).
 <!-- the grid, in this order -->
 <script defer src="js/sac-data-grid-types.js"></script>
 <script defer src="js/sac-data-grid.js"></script>
+<script defer src="js/sac-data-grid-edit.js"></script>
 <script defer src="js/sac-data-grid-source.js"></script>
 <script defer src="js/sac-data-grid.de.js"></script>
 

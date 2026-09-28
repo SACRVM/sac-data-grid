@@ -11,8 +11,9 @@
  * Requires kit ≥ 2.21.0 (css/ui.css, lib/globals.js, and the components it
  * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog and the cell
  * editors) plus the grid's own scripts, in this order:
- *   js/sac-data-grid-types.js, js/sac-data-grid.js,
- *   js/sac-data-grid-source.js, js/sac-data-grid.de.js
+ *   js/sac-data-grid-types.js, js/sac-data-grid.js, js/sac-data-grid-edit.js
+ *   (sheet editing; without it the grid is read-only), js/sac-data-grid-source.js,
+ *   js/sac-data-grid.de.js
  *
  * Usage:
  *   <sac-data-grid id="orders" label="Orders"></sac-data-grid>
@@ -307,6 +308,55 @@
             --spinner-size: 14px;
         }
         .row.msg.error > .note { color: var(--danger-text); }
+
+        /* ---- editing (sheet mode) ---- */
+        .cell.editing { padding: 0; background-color: var(--grid-bg); z-index: 2; }
+        /* The kit's .cell-input recipe (ui.css does not pierce the shadow root). */
+        .cell-input,
+        .cell-input:hover,
+        .cell-input:focus {
+            display: block;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0 var(--cell-padding-inline, 8px);
+            font: inherit;
+            color: inherit;
+            background: transparent;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            outline: none;
+        }
+        .cell.ar .cell-input { text-align: right; }
+        .dt-editor { display: flex; height: 100%; }
+        .dt-editor > * { flex: 1 1 0; min-width: 0; }
+        .long-pop {
+            position: fixed;
+            inset: auto;
+            margin: 0;
+            padding: 0;
+            border: 1px solid var(--accent);
+            border-radius: var(--radius-m);
+            background: var(--panel-2);
+            box-shadow: var(--shadow-2);
+            color: var(--text);
+            overflow: hidden;
+        }
+        .long-pop textarea.cell-input {
+            padding: 6px var(--cell-padding-inline, 8px);
+            resize: none;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+        .row.deleted > .cell { text-decoration: line-through; color: var(--text-dim); }
+        .row.created > .rh { color: var(--accent-warm-text); }
+        .row.newline > .cell, .row.newline > .rh { color: var(--text-dim); }
+        .scroller[data-mode="sheet"][aria-readonly="false"] .cell:not(.ro) .bool { cursor: pointer; }
+        .status .extra { display: flex; align-items: center; gap: 8px; }
+        .status .extra[hidden] { display: none; }
+        .status .err { color: var(--danger-text); }
+        .status .busy { display: inline-flex; align-items: center; gap: 6px; --spinner-size: 12px; }
 
         /* cell renders */
         .bool {
@@ -781,6 +831,11 @@ class SacDataGrid extends HTMLElement {
             for (const h of this._hcells || []) h._mb.classList.remove("open");
         }).observe(this._menu, { attributes: true, attributeFilter: ["open"] });
 
+        // The kit fields inside (editors, filters, menus) announce their own
+        // composed events; the grid speaks for itself on the host.
+        for (const type of ["sac:change", "sac:input", "sac:select", "sac:commit", "sac:cancel", "sac:create", "sac:open", "sac:close", "sac:remove", "sac:action"]) {
+            this.shadowRoot.addEventListener(type, (e) => e.stopPropagation());
+        }
         this._scroller.setAttribute("aria-label", this.getAttribute("label") || t("data-grid.label", "Data grid"));
         this._scroller.addEventListener("scroll", () => this._onScroll(), { passive: true });
         this._scroller.addEventListener("keydown", (e) => this._onKeydown(e));
@@ -1054,8 +1109,19 @@ class SacDataGrid extends HTMLElement {
     /** Data index of display row 0 (pages: the page start). */
     _base() { return this._paging() === "pages" ? this._page * this._pageSize() : 0; }
 
-    /** Rows in the current window (the whole result, or the current page). */
+    /** Rows in the current window: the source's, then rows added here and
+     *  not yet reloaded (sheet mode). */
     _rowCount() {
+        return this._dataCount() + (this._creates ? this._creates.length : 0);
+    }
+
+    /** Rows the cursor can reach: the rows, plus the "new row" line. */
+    _navRows() {
+        return this._rowCount() + (this._newLine ? this._newLine() : 0);
+    }
+
+    /** The source's rows in the current window (the whole result, or the page). */
+    _dataCount() {
         if (this._paging() === "pages") {
             const size = this._pageSize();
             if (this._total != null) return clamp(this._total - this._base(), 0, size);
@@ -1086,6 +1152,7 @@ class SacDataGrid extends HTMLElement {
     }
 
     _resetData(keep) {
+        if (this._onReset) this._onReset(keep);
         this._query++;
         for (const b of this._blocks.values()) if (b.ctrl) b.ctrl.abort();
         this._blocks.clear();
@@ -1109,7 +1176,14 @@ class SacDataGrid extends HTMLElement {
         this._end = { ...this._cur };
     }
 
+    /** The row object at display index r: undefined while its block is not
+     *  loaded, null past the rows (the "new row" line). */
     _rowAt(r) {
+        const dc = this._dataCount();
+        if (r >= dc) {
+            const k = r - dc;
+            return this._creates && k < this._creates.length ? this._creates[k] : null;
+        }
         const i = this._base() + r;
         const blk = this._blocks.get(Math.floor(i / this._bs));
         return blk && blk.rows ? blk.rows[i - Math.floor(i / this._bs) * this._bs] : undefined;
@@ -1121,7 +1195,11 @@ class SacDataGrid extends HTMLElement {
 
     _indexOfId(id) {
         const key = this._keyField();
-        const base = this._base(), rows = this._rowCount(), bs = this._bs;
+        const base = this._base(), rows = this._dataCount(), bs = this._bs;
+        if (this._creates) {
+            const k = this._creates.findIndex((row) => row[key] === id);
+            if (k >= 0) return rows + k;
+        }
         for (const [b, blk] of this._blocks) {
             if (!blk.rows) continue;
             for (let k = 0; k < blk.rows.length; k++) {
@@ -1238,7 +1316,7 @@ class SacDataGrid extends HTMLElement {
     }
 
     _clampSelection() {
-        const rows = this._rowCount(), cols = this._cols.length;
+        const rows = this._navRows(), cols = this._cols.length;
         const fix = (p) => ({ r: clamp(p.r, 0, Math.max(0, rows - 1)), c: clamp(p.c, 0, Math.max(0, cols - 1)) });
         this._cur = fix(this._cur);
         this._anchor = fix(this._anchor);
@@ -1247,7 +1325,7 @@ class SacDataGrid extends HTMLElement {
 
     _allLoaded() {
         if (this._total == null) return false;
-        const base = this._base(), rows = this._rowCount(), bs = this._bs;
+        const base = this._base(), rows = this._dataCount(), bs = this._bs;
         if (!rows) return true;
         for (let b = Math.floor(base / bs); b <= Math.floor((base + rows - 1) / bs); b++) {
             const blk = this._blocks.get(b);
@@ -1300,7 +1378,8 @@ class SacDataGrid extends HTMLElement {
         this._hook();
         const rows = this._rowCount();
         const note = this._note(rows);
-        const n = rows + (note ? 1 : 0);
+        this._nl = this._newLine ? this._newLine() : 0;
+        const n = rows + this._nl + (note ? 1 : 0);
         const h = n * this._rowH;
         if (this._bodyH !== h) {
             this._bodyH = h;
@@ -1312,9 +1391,14 @@ class SacDataGrid extends HTMLElement {
 
         const keep = new Map();
         const free = [];
+        const pinned = this._editor ? this._editor.r : -1;   // the row being edited stays put
         for (const row of this._pool) {
-            if (row._r >= first && row._r <= last && !keep.has(row._r)) keep.set(row._r, row);
+            if (((row._r >= first && row._r <= last) || (row._r === pinned && row._r >= 0)) && !keep.has(row._r)) keep.set(row._r, row);
             else free.push(row);
+        }
+        if (pinned >= 0 && keep.has(pinned) && (pinned < first || pinned > last)) {
+            const row = keep.get(pinned);
+            if (row._stamp !== this._stamp) this._fillRow(row, pinned, rows, note);
         }
         for (let r = first; r <= last; r++) {
             let row = keep.get(r);
@@ -1330,8 +1414,9 @@ class SacDataGrid extends HTMLElement {
         }
         // The note's block (the next page of an open-ended result) loads only
         // once the note scrolls into view: that is incremental loading.
-        const noteSeen = note && rows >= first && rows <= last;
-        this._request(first, Math.min(last, rows - 1), noteSeen ? note : null);
+        const noteAt = rows + this._nl;
+        const noteSeen = note && noteAt >= first && noteAt <= last;
+        this._request(first, Math.min(last, this._dataCount() - 1), noteSeen ? note : null);
         this._paintSelection();
         this._renderFoot();
         this._renderStatus();
@@ -1383,10 +1468,11 @@ class SacDataGrid extends HTMLElement {
         const idx = this._base() + r;
         row.setAttribute("aria-rowindex", String(idx + 2));
         if (r >= rows) {
-            this._fillNote(row, note);
+            if (this._nl && r === rows) this._fillNewLine(row);
+            else this._fillNote(row, note);
             return;
         }
-        row.classList.remove("msg", "error");
+        row.classList.remove("msg", "error", "newline");
         row._rh.textContent = String(idx + 1);
         const data = this._rowAt(r);
         if (data === undefined) {
@@ -1397,6 +1483,7 @@ class SacDataGrid extends HTMLElement {
                 return;
             }
             row.classList.add("skel");
+            row.classList.remove("deleted", "created");
             for (const cell of row._cells) {
                 if (cell._text !== "") { cell.textContent = ""; cell._text = ""; }
                 cell.classList.remove("dirty", "invalid", "ro");
@@ -1407,19 +1494,22 @@ class SacDataGrid extends HTMLElement {
         }
         row.classList.remove("skel");
         const editable = this._editable();
+        const view = this._view ? this._view(data) : data;    // with unsaved edits, for computed columns
+        const editing = this._editor && this._editor.r === r ? this._editor.c : -1;
         for (let c = 0; c < this._cols.length; c++) {
             const col = this._cols[c], cell = row._cells[c];
+            if (c === editing) continue;                        // the editor owns that cell
             const v = this._get(data, col);
             if (col.render) {
-                col.render(cell, v, col, data);
+                col.render(cell, v, col, view);
                 cell._text = null;
             } else {
-                const s = col.text(v, data);
+                const s = col.text(v, view);
                 if (cell._text !== s) { cell.textContent = s; cell._text = s; }
             }
             const ro = !editable || col.readonly;
             cell.classList.toggle("ro", ro && editable);
-            if (editable) cell.setAttribute("aria-readonly", String(ro));
+            if (editable) this._attr(cell, "aria-readonly", String(ro));
             else cell.removeAttribute("aria-readonly");
             const state = this._cellState ? this._cellState(data, col) : null;
             cell.classList.toggle("dirty", !!(state && state.dirty));
@@ -1432,10 +1522,11 @@ class SacDataGrid extends HTMLElement {
                 cell.removeAttribute("aria-invalid");
             }
         }
+        if (this._paintRowState) this._paintRowState(row, data);
     }
 
     _fillNote(row, note) {
-        row.classList.remove("skel");
+        row.classList.remove("skel", "newline", "deleted", "created");
         row.classList.add("msg");
         row.classList.toggle("error", note.kind === "error");
         const box = row._note;
@@ -1532,7 +1623,7 @@ class SacDataGrid extends HTMLElement {
         const rows = this._rowCount();
         for (let r = 0; r < rows; r++) {
             const row = this._rowAt(r);
-            if (row === undefined) continue;
+            if (!row || (this._isDeleted && this._isDeleted(row))) continue;
             const v = this._get(row, col);
             if (!col.type.empty(v)) vals.push(v);
         }
@@ -1713,7 +1804,7 @@ class SacDataGrid extends HTMLElement {
     /** Move the active cell (and collapse the range), or with extend move the
      *  range's far corner. */
     _setCursor(r, c, extend) {
-        const rows = this._rowCount(), cols = this._cols.length;
+        const rows = this._navRows(), cols = this._cols.length;
         if (!rows || !cols) return;
         r = clamp(r, 0, rows - 1);
         c = clamp(c, 0, cols - 1);
@@ -1838,7 +1929,8 @@ class SacDataGrid extends HTMLElement {
     _onKeydown(e) {
         if (e.defaultPrevented) return;
         if (this._editor) { if (this._onEditKeydown) this._onEditKeydown(e); return; }
-        const cols = this._cols.length, rows = this._rowCount();
+        if (e.target !== this._scroller) return;               // a button or field inside the grid
+        const cols = this._cols.length, rows = this._navRows();
         if (!cols) return;
         const mod = e.ctrlKey || e.metaKey;
         const shift = e.shiftKey;
@@ -1866,7 +1958,8 @@ class SacDataGrid extends HTMLElement {
                 this._setCursor(mod ? 0 : from.r, 0, shift);
                 break;
             case "End":
-                this._setCursor(mod ? rows - 1 : from.r, cols - 1, shift);
+                // Ctrl+End: the last row with data, not the "new row" line.
+                this._setCursor(mod ? Math.max(0, this._rowCount() - 1) : from.r, cols - 1, shift);
                 break;
             case "PageUp":
             case "PageDown": {
@@ -1893,7 +1986,7 @@ class SacDataGrid extends HTMLElement {
             case " ":
                 if (shift && !mod) { if (rows) this._selectRows(this._cur.r, this._cur.r); }
                 else if (mod && !shift) this._selectCols(this._cur.c, this._cur.c);
-                else handled = this._onSpace ? this._onSpace(e) : false;
+                else if (this._onSpace) this._onSpace(e);          // never scrolls the grid
                 break;
             case "F10":
                 if (shift) this._openRowMenu(null);
@@ -1935,9 +2028,13 @@ class SacDataGrid extends HTMLElement {
 
     _onBodyPointerDown(e) {
         if (e.button !== 0 && e.button !== 2) return;
+        if (this._editor) {
+            if (this._inEditor && this._inEditor(e)) return;      // clicks inside the editor are its own
+            this._commitEdit(null);
+        }
         if (e.target.closest("button")) return;
         const row = this._rowOf(e.target);
-        if (!row || this._editor) return;
+        if (!row) return;
         const r = row._r;
         const rh = e.target.closest(".rh");
         const cell = e.target.closest(".cell");
@@ -1991,7 +2088,7 @@ class SacDataGrid extends HTMLElement {
         const rect = this._scrollerRect;
         const p = this._dragPt;
         const h = this._hit(p.x, p.y);
-        const rows = this._rowCount();
+        const rows = this._navRows();
         const r = clamp(h.r, 0, rows - 1);
         if (this._drag === "rows") this._select({ r: this._anchor.r, c: 0 }, { r, c: this._cols.length - 1 }, true);
         else this._setCursor(r, h.c, true);
