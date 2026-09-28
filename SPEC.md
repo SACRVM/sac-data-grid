@@ -23,7 +23,29 @@ GitHub issue in this repo) before treating the default as final.
   (a fake async source with latency), every column type, frozen columns,
   footer totals, light/dark, EN/DE.
 
-## 2. Features — v1 (Decided)
+## 2. Edit modes (Decided — the core of the product)
+
+Both ways of editing have their use case, so the grid supports all of them,
+switchable at runtime (`mode` attribute/property, and optionally a toggle the
+host can show):
+
+| `mode` | What the user gets |
+|---|---|
+| `read` | A pure read view: selection, copy, sort, filter, but no editing affordances at all. |
+| `sheet` | The full spreadsheet mode: inline cell editing, range selection, paste, fill, undo (§3, §5). |
+| `form` | The classic record editing: the list stays read-only, and a row opens as a **form in a `<sac-dialog>`** (Enter or double-click on a row, or an Edit action). The form shows all editable fields with labels (`size="regular"` kit fields), validation, and Save/Cancel. It also offers Previous/Next record and "New" for adding rows. |
+
+- `sheet` and `form` coexist. In `sheet` mode the row dialog is still
+  available as "Open record" (Shift+Enter or the row menu), for fields that
+  are awkward inline (long text, many columns off-screen).
+- A column can opt out of inline editing (`inline: false`) and is then only
+  editable in the form.
+- The same validation, dirty tracking, `save-mode` and `source.save()` path
+  apply in every mode. The form commits one record (one `changes` entry).
+- On phones the form dialog (a bottom sheet) is the way to edit, whatever the
+  mode (see §7-4).
+
+## 2b. Features — v1 (Decided)
 
 | Area | v1 |
 |---|---|
@@ -52,7 +74,7 @@ collaboration, row detail expansion.
 | Home / End, Ctrl+Home / Ctrl+End | Row start/end, grid start/end | editor |
 | PgUp / PgDn | Page | — |
 | Tab / Shift+Tab | Next/previous cell, wraps to next/previous row | Commit, then move |
-| Enter / Shift+Enter | Start editing (keep value) | Commit, move down/up |
+| Enter / Shift+Enter | Start editing (keep value) / open the record form | Commit, move down/up |
 | F2 | Start editing (keep value, caret at end) | — |
 | Printable key | Start editing, **replace** value with the key | editor |
 | Esc | Clear range to cursor | Cancel edit, restore value |
@@ -142,7 +164,7 @@ of working around it inside the grid.
 | 1 | Save mode default: per cell, per row on leaving the row (SharePoint), or batched with a Save button | `save-mode="row"`; all three supported |
 | 2 | Loading default: incremental scroll or pages with a pager in the footer | `paging="scroll"`; `paging="pages"` supported |
 | 3 | Look: spreadsheet-dense with cell grid lines, or quiet like kit lists (row lines only, cell outline on the cursor) | quiet; `lines="grid"` option |
-| 4 | Phones: editable (row form as a bottom sheet) or read-only | read + row form sheet |
+| 4 | Phones: editable or read-only | editable through the form dialog (bottom sheet), no inline editing |
 
 ## 8. Quality bar
 
