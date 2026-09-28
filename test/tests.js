@@ -591,7 +591,6 @@ module.exports = function ({ test, eq, ok, center }) {
     test("read mode has no editing affordances", async (p) => {
         await p.load("/test/fixture.html?rows=5&mode=read");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
-        await p.key("Enter");
         await p.type("x");
         await p.key("Delete");
         await p.key(" ");
@@ -615,5 +614,172 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.key("Enter");
         await settle(p);
         eq(await p.eval("fx.data[0].w1"), "far");
+    });
+    /* ------------------------------------------------- paste, cut, the form -- */
+
+    const dialogOpen = (p) => p.eval("!!document.querySelector('sac-dialog[open]')");
+
+    test("paste TSV: fill, block, parse, reject, extend, one undo", async (p) => {
+        await p.load("/test/fixture.html?rows=6&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.key("ArrowDown", ["Shift"]);
+        await p.key("ArrowRight", ["Shift"]);
+        ok(await p.eval("fx.pasteText('same')"), "paste handled");
+        await settle(p);
+        eq(await p.eval("[fx.cell(0, 11), fx.cell(0, 12), fx.cell(1, 11), fx.cell(1, 12)]"), ["same", "same", "same", "same"], "one value fills the range");
+        await p.eval("sac.regional.set({ number: '1.234,5' })");
+        await p.eval("fx.grid.focusCell(1, 'n')");
+        await p.eval(`fx.pasteText("1.234,5\\t2026-03-04\\r\\nabc\\t04.05.2026\\r\\n")`);
+        await settle(p);
+        eq(await p.eval("[0, 1].map(i => [fx.grid._get(fx.data[i], fx.grid._cols[2]), fx.grid._get(fx.data[i], fx.grid._cols[3])])"),
+            [[1234.5, "2026-03-04"], [3.7, "2026-05-04"]], "parsed per type; the bad number not applied");
+        ok(await p.eval("fx.cellEl(1, 2).classList.contains('invalid')"), "bad cell marked");
+        ok((await p.eval("fx.cellEl(1, 2).title")).includes("abc"), "with the rejected text");
+        await p.eval("sac.regional.set({ number: '1,234.5' })");
+        await p.eval("fx.grid.focusCell(6, 'name')");
+        await p.eval(`fx.pasteText("x1\\ny1\\nz1")`);
+        await settle(p);
+        eq((await p.eval("fx.state()")).rows, 8, "two rows added past the end");
+        eq(await p.eval("[fx.cell(5, 1), fx.cell(6, 1), fx.cell(7, 1)]"), ["x1", "y1", "z1"]);
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq([(await p.eval("fx.state()")).rows, await p.eval("fx.cell(5, 1)")], [6, "Felix 6"], "one undo takes the paste back");
+    });
+
+    test("paste saves the other rows at once in row mode", async (p) => {
+        await p.load("/test/fixture.html?rows=6");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.eval(`fx.pasteText("a\\nb\\nc")`);
+        await settle(p);
+        eq((await saves(p)).map((s) => s.map((c) => c.id)), [[2, 3]], "rows 2 and 3 saved, the cursor's row waits");
+        await p.key("ArrowDown");
+        await settle(p);
+        eq(await p.eval("fx.grid.dirty"), 0);
+    });
+
+    test("cut copies and clears", async (p) => {
+        await p.load("/test/fixture.html?rows=6&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        const text = await p.eval(`(() => {
+            let t = null;
+            const grab = (e) => { t = e.clipboardData.getData("text/plain"); };
+            document.addEventListener("cut", grab);
+            document.execCommand("cut");
+            document.removeEventListener("cut", grab);
+            return t;
+        })()`);
+        eq(text, "wide 1");
+        await settle(p);
+        eq(await p.eval("fx.cell(1, 11)"), "");
+    });
+
+    test("form mode: a record in a sac-dialog, one changes entry", async (p) => {
+        await p.load("/test/fixture.html?rows=10&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        ok(await dialogOpen(p), "dialog open");
+        eq(await p.eval("document.querySelector('sac-dialog').getAttribute('title')"), "Ben 2");
+        eq(await p.eval("fx.grid._formState.fields.length"), 14, "every column");
+        eq(await p.eval("fx.activeTag()"), "input", "first editable field focused");
+        await p.key("a", ["Control"]);
+        await p.type("Bea");
+        await p.eval("fx.grid._formState.fields[2].focus.value = 5");
+        await p.key("Enter", ["Control"]);
+        await settle(p);
+        ok(!(await dialogOpen(p)), "closed after saving");
+        eq(await p.eval("[fx.data[1].name, fx.data[1].n]"), ["Bea", 5]);
+        const s = await saves(p);
+        eq([s.length, s[0].length, s[0][0].fields], [1, 1, { name: "Bea", n: 5 }], "one save, one entry");
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "focus back on the grid");
+    });
+
+    test("form validation, previous / next and new", async (p) => {
+        await p.load("/test/fixture.html?rows=10&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.eval("fx.grid._formState.fields[1].focus.value = ''");
+        await p.eval("document.querySelector('sac-dialog').trigger('save')");
+        await settle(p);
+        ok(await dialogOpen(p), "stays open");
+        eq(await p.eval("fx.grid._formState.fields[1].err.textContent"), "Required");
+        await p.eval("fx.grid._formState.fields[1].focus.value = 'Ben two'");
+        await p.eval("fx.grid._formState.nav.querySelectorAll('button')[1].click()");
+        await settle(p);
+        eq(await p.eval("document.querySelector('sac-dialog').getAttribute('title')"), "Clara 3", "next record");
+        eq(await p.eval("fx.data[1].name"), "Ben two", "saved on the way");
+        eq((await p.eval("fx.state()")).cur.r, 2, "the grid's cursor follows");
+        await p.eval("fx.grid._formState.nav.querySelectorAll('button')[2].click()");
+        await settle(p);
+        eq(await p.eval("document.querySelector('sac-dialog').getAttribute('title')"), "New record");
+        await p.eval("fx.grid._formState.fields[1].focus.value = 'Newbie'");
+        await p.eval("document.querySelector('sac-dialog').trigger('save')");
+        await settle(p);
+        eq(await p.eval("[fx.source.rows.length, fx.source.rows[10].name]"), [11, "Newbie"], "created");
+    });
+
+    test("read mode opens the record read-only", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=read");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        eq(await p.eval("fx.grid._formState.readOnly"), true);
+        eq(await p.eval("document.querySelector('sac-dialog').buttons.map(b => b.action)"), ["close"]);
+        eq(await p.eval("fx.grid._formState.fields[1].focus.disabled"), true);
+        await p.key("Escape");
+        await p.frames(3);
+        ok(!(await dialogOpen(p)), "closed");
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "focus back");
+    });
+
+    test("sheet mode: Shift+Enter opens the record", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'name')");
+        await p.key("Enter", ["Shift"]);
+        await p.frames(3);
+        ok(await dialogOpen(p));
+        eq(await p.eval("fx.grid._formState.readOnly"), false);
+        await p.key("Escape");
+    });
+
+    test("phones: no inline editing, the form is the way to edit", async (p) => {
+        await p.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 2, mobile: true });
+        try {
+            await p.load("/test/fixture.html?rows=5");
+            ok(await p.eval("fx.grid._compact()"), "compact");
+            await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+            await p.type("x");
+            eq((await p.eval("fx.state()")).editing, false, "typing does not edit inline");
+            eq((await p.eval("fx.state()")).rows, 5, "no new-row line");
+            await p.key("Enter");
+            await p.frames(3);
+            ok(await dialogOpen(p), "Enter opens the form");
+            await p.key("Escape");
+            await p.frames(3);
+            const c = await center(p, "fx.cellEl(0, 1)");
+            await p.click(c.x, c.y);
+            await p.frames(3);
+            ok(await dialogOpen(p), "a tap on the active cell opens it");
+            await p.key("Escape");
+            await p.eval("fx.grid.setAttribute('compact-edit', 'read')");
+            await p.key("Enter");
+            await p.frames(3);
+            eq(await p.eval("fx.grid._formState.readOnly"), true, "compact-edit=read");
+            await p.key("Escape");
+        } finally {
+            await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+        }
+    });
+
+    test("mode-toggle shows a switch", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        eq(await p.eval("fx.grid.shadowRoot.querySelector('.modes').hidden"), true, "off by default");
+        await p.eval("fx.grid.setAttribute('mode-toggle', '')");
+        await settle(p);
+        eq(await p.eval("fx.grid.shadowRoot.querySelector('.modes').hidden"), false);
+        await p.eval("fx.grid.shadowRoot.querySelector('.modes [data-value=form]').click()");
+        await settle(p);
+        eq(await p.eval("fx.grid.mode"), "form");
     });
 };

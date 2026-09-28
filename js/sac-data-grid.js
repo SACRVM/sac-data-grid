@@ -12,8 +12,8 @@
  * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog and the cell
  * editors) plus the grid's own scripts, in this order:
  *   js/sac-data-grid-types.js, js/sac-data-grid.js, js/sac-data-grid-edit.js
- *   (sheet editing; without it the grid is read-only), js/sac-data-grid-source.js,
- *   js/sac-data-grid.de.js
+ *   (editing; without it the grid is read-only), js/sac-data-grid-form.js (the
+ *   record form), js/sac-data-grid-source.js, js/sac-data-grid.de.js
  *
  * Usage:
  *   <sac-data-grid id="orders" label="Orders"></sac-data-grid>
@@ -34,6 +34,10 @@
  *   page-size  — rows per page for paging="pages" (default 100).
  *   lines      — "quiet" (default: row lines, a cell outline on the cursor)
  *                or "grid" (cell grid lines) (SPEC §7-3).
+ *   mode-toggle — presence shows a Read · Sheet · Form switch in the footer.
+ *   compact-edit — phones (the kit's compact viewport): "form" (default: the
+ *                record form is the way to edit, no inline editing) or
+ *                "read" (read-only there) (SPEC §7-4).
  *
  * Properties:
  *   columns — [{ field, label, labelKey?, type, width?, minWidth?, frozen?,
@@ -72,7 +76,12 @@
  * PgUp / PgDn, Tab / Shift+Tab (leaving the grid past the last / first cell),
  * Esc clears the range, Ctrl+A selects all, Shift+Space the row, Ctrl+Space
  * the column, Alt+↓ opens the column menu, Shift+F10 / the menu key the row
- * menu, Ctrl+C copies TSV, Alt+PgUp / Alt+PgDn change the page.
+ * menu, Ctrl+C / X / V copy, cut and paste TSV, Alt+PgUp / Alt+PgDn change
+ * the page. Editing (js/sac-data-grid-edit.js): Enter, F2 or typing edit in
+ * sheet mode (Enter opens the record form in form and read mode, Shift+Enter
+ * everywhere), Enter / Shift+Enter / Tab commit and move, Esc cancels,
+ * Delete / Backspace clear, Space toggles a bool, Ctrl+Z / Ctrl+Y undo and
+ * redo, Ctrl+S saves.
  *
  * CSS custom properties: --grid-bg (the ground frozen cells paint, default
  * --bg; set it to the surface the grid sits on), --cell-padding-inline.
@@ -597,7 +606,7 @@
 
 class SacDataGrid extends HTMLElement {
     static get observedAttributes() {
-        return ["mode", "save-mode", "paging", "page-size", "lines", "label"];
+        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit"];
     }
 
     constructor() {
@@ -693,7 +702,12 @@ class SacDataGrid extends HTMLElement {
                 this._resetData();
                 break;
             case "save-mode":
+            case "mode-toggle":
                 this._renderStatus();
+                break;
+            case "compact-edit":
+                this._stamp++;
+                this._scheduleRender();
                 break;
         }
     }
@@ -797,6 +811,7 @@ class SacDataGrid extends HTMLElement {
                     <span class="selinfo"></span>
                     <span class="spacer"></span>
                     <span class="extra"></span>
+                    <span class="modes" hidden></span>
                     <nav class="pager" hidden></nav>
                 </div>
                 <div class="sr live" aria-live="polite"></div>
@@ -815,6 +830,7 @@ class SacDataGrid extends HTMLElement {
         this._countEl = $(".count");
         this._selEl = $(".selinfo");
         this._extraEl = $(".extra");
+        this._modesEl = $(".modes");
         this._pager = $(".pager");
         this._live = $(".live");
         this._pop = $(".pop");
@@ -927,9 +943,7 @@ class SacDataGrid extends HTMLElement {
             cols = [this._all[0]];
         }
         this._cols = cols;
-        let nf = 0;
-        while (nf < cols.length && cols[nf].frozen) nf++;
-        this._nf = nf;
+        this._nf = this._frozenCount();
         this._cur.c = clamp(this._cur.c, 0, Math.max(0, cols.length - 1));
         this._anchor.c = clamp(this._anchor.c, 0, Math.max(0, cols.length - 1));
         this._end.c = clamp(this._end.c, 0, Math.max(0, cols.length - 1));
@@ -946,6 +960,22 @@ class SacDataGrid extends HTMLElement {
     _widthOf(col) {
         const w = this._widths[col.field];
         return Math.max(col.minWidth, w != null ? w : col.width);
+    }
+
+    /** The leading frozen columns — as many as leave the grid room to scroll
+     *  (at most 60 % of its width: a phone keeps one, not all). */
+    _frozenCount() {
+        const cols = this._cols;
+        let nf = 0;
+        while (nf < cols.length && cols[nf].frozen) nf++;
+        if (!this._vw) return nf;
+        let w = this._rhW, fit = 0;
+        for (let i = 0; i < nf; i++) {
+            w += this._widthOf(cols[i]);
+            if (w > this._vw * 0.6) break;
+            fit = i + 1;
+        }
+        return fit;
     }
 
     /** Column geometry → CSS variables; frozen offsets. No layout reads. */
@@ -1356,6 +1386,7 @@ class SacDataGrid extends HTMLElement {
         this._st = this._scroller.scrollTop;
         this._sl = this._scroller.scrollLeft;
         this._canvas.style.setProperty("--vw", this._vw + "px");
+        if (this._cols.length && !this._editor && this._frozenCount() !== this._nf) this._visible();
         this._scheduleRender();
     }
 
@@ -1647,7 +1678,38 @@ class SacDataGrid extends HTMLElement {
         if (this._countEl._t !== count) { this._countEl._t = count; this._countEl.textContent = count; }
         this._renderSelInfo();
         this._renderPager();
+        this._renderModes();
         if (this._renderExtra) this._renderExtra();
+    }
+
+    /** The optional mode switch (mode-toggle attribute): Read · Sheet · Form. */
+    _renderModes() {
+        const box = this._modesEl;
+        const show = this.hasAttribute("mode-toggle");
+        box.hidden = !show;
+        if (!show) return;
+        const labels = {
+            read: t("data-grid.mode-read", "Read"),
+            sheet: t("data-grid.mode-sheet", "Sheet"),
+            form: t("data-grid.mode-form", "Form"),
+        };
+        const key = `${this.mode}|${labels.read}|${labels.sheet}|${labels.form}`;
+        if (box._t === key) return;
+        box._t = key;
+        let seg = box.firstChild;
+        if (!seg) {
+            seg = document.createElement("sac-segmented-control");
+            seg.addEventListener("sac:change", (e) => { this.mode = e.detail.value; });
+            box.appendChild(seg);
+        }
+        seg.replaceChildren(...MODES.map((m) => {
+            const b = el("button", "", labels[m]);
+            b.type = "button";
+            b.dataset.value = m;
+            return b;
+        }));
+        seg.setAttribute("aria-label", t("data-grid.mode", "Editing mode"));
+        seg.value = this.mode;
     }
 
     _renderSelInfo() {
@@ -1772,6 +1834,7 @@ class SacDataGrid extends HTMLElement {
         this._countEl._t = null;
         this._selEl._t = null;
         this._pager._t = null;
+        this._modesEl._t = null;
         this._stamp++;
         this._scheduleRender();
         if (this._onRelabel) this._onRelabel();
@@ -2038,6 +2101,10 @@ class SacDataGrid extends HTMLElement {
         const r = row._r;
         const rh = e.target.closest(".rh");
         const cell = e.target.closest(".cell");
+        // A tap on the cell that was already active (phones: open the record).
+        // Remembered here: pointer capture sends the click to the body.
+        this._tapActive = !!cell && !e.shiftKey && r === this._cur.r && cell._c === this._cur.c;
+        this._tapCell = cell ? { r, c: cell._c } : null;
         e.preventDefault();
         this._scroller.focus({ preventScroll: true });
         if (e.button === 2) {
@@ -2059,6 +2126,7 @@ class SacDataGrid extends HTMLElement {
             else this._setCursor(r, cell._c, false);
             this._drag = "cells";
         } else return;
+        if (e.pointerType === "touch") { this._drag = null; return; }   // a finger scrolls; it does not paint ranges
         this._startDrag(e);
     }
 
@@ -2109,7 +2177,12 @@ class SacDataGrid extends HTMLElement {
 
     _onBodyClick(e) {
         const retry = e.target.closest("button.retry");
-        if (retry) this._retry(retry._block);
+        if (retry) { this._retry(retry._block); return; }
+        const tap = this._tapCell;
+        this._tapCell = null;
+        if (tap && this._onCellClick && tap.r === this._cur.r && tap.c === this._cur.c) {
+            this._onCellClick(tap.r, tap.c, this._tapActive);
+        }
     }
 
     _onBodyDblClick(e) {
@@ -2563,6 +2636,7 @@ class SacDataGrid extends HTMLElement {
     _modeChanged() {
         if (!this._built) return;
         if (this._onModeChanged) this._onModeChanged();
+        this._modesEl._t = null;
         this._stamp++;
         this._scheduleRender();
     }

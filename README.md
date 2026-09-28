@@ -6,11 +6,18 @@ A spreadsheet-grade, editable data table for [SACRVM APPKIT](https://github.com/
 - Virtualized rows (100k+ scroll smoothly), fixed header and footer, frozen columns.
 - Pagination or incremental loading from any async source.
 - Sort (multi-column), type-aware filters, resizable and hideable columns, a persistable `view`.
-- Excel-style keyboard, range selection and TSV copy.
-- Inline editing with the kit's own fields (in progress).
+- Three edit modes, switchable at runtime: `read`, `sheet` (inline editing with
+  the kit's own cell editors) and `form` (a record form in a `<sac-dialog>`,
+  the way to edit on phones).
+- Excel-style keyboard, range selection, TSV copy / cut / paste (round-trips
+  with Excel, Google Sheets, SharePoint), undo / redo.
+- Validation, dirty tracking, save per cell, per row or in batches; row add
+  and delete with an Undo toast; footer totals and selection stats.
 
-**Status:** v1 in progress. The binding specification is [`SPEC.md`](SPEC.md).
-Zero build: plain files, the kit vendored in `kit/` (≥ 2.21.0).
+**Status:** v1 implemented against [`SPEC.md`](SPEC.md) (the binding
+specification). The open decisions of SPEC §7 ship with their provisional
+defaults and are switchable by attribute. Zero build: plain files, the kit
+vendored in `kit/` (≥ 2.21.0).
 
 ## Use
 
@@ -22,6 +29,7 @@ Zero build: plain files, the kit vendored in `kit/` (≥ 2.21.0).
 <script defer src="js/sac-data-grid-types.js"></script>
 <script defer src="js/sac-data-grid.js"></script>
 <script defer src="js/sac-data-grid-edit.js"></script>
+<script defer src="js/sac-data-grid-form.js"></script>
 <script defer src="js/sac-data-grid-source.js"></script>
 <script defer src="js/sac-data-grid.de.js"></script>
 

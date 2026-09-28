@@ -513,6 +513,7 @@
             if (!ids.includes(e.id)) ids.push(e.id);
         }
         for (const id of ids) this._tidy(id);
+        this._lastChanges = undo;          // for callers that build a compound undo step
         if (!undo.length) return ids;
         if (record) this._pushUndo({ type: "cells", changes: undo });
         this._stamp++;
@@ -522,9 +523,21 @@
         return ids;
     };
 
+    /** After a change across rows: cell mode saves them all; row mode saves
+     *  the rows the cursor is not in (it is "in" no other row to leave). */
+    P._afterBulk = function (ids) {
+        if (!ids || !ids.length) return;
+        if (this.saveMode === "cell") this._save(ids);
+        else if (this.saveMode === "row") {
+            const here = this._idOf(this._rowAt(this._cur.r));
+            const others = ids.filter((id) => id !== here);
+            if (others.length) this._save(others);
+        }
+    };
+
     /** Delete / Backspace: empty the editable cells of the range. */
     P._clearRange = function () {
-        if (this.mode !== "sheet" || !this._editable()) return;
+        if (this.mode !== "sheet" || !this._editable() || this._compact()) return;
         const s = this._rect();
         const list = [];
         for (let r = s.r1; r <= s.r2; r++) {
@@ -536,8 +549,100 @@
                 list.push({ row, col, value: emptyOf(col) });
             }
         }
-        const ids = this._applyChanges(list, true);
-        if (ids.length && this.saveMode === "cell") this._save(ids);
+        this._afterBulk(this._applyChanges(list, true));
+    };
+
+    /** Cut = copy (done by the core) + clear. */
+    P._cut = function () { this._clearRange(); };
+
+    /**
+     * Paste TSV (Excel, Google Sheets, SharePoint). One value fills the whole
+     * range; a block tiles a range that is a multiple of it; otherwise it
+     * lands at the range's top-left and extends from there — past the last
+     * row it adds rows (sheet mode). Values are parsed per column type;
+     * cells that fail parsing or validation are marked and not applied.
+     * One undo step.
+     */
+    P._paste = function (e) {
+        if (this.mode !== "sheet" || !this._editable() || this._compact()) return;
+        const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+        e.preventDefault();
+        const data = Grid.parseTSV(text);
+        if (!data.length) return;
+        const R = data.length, C = Math.max(1, ...data.map((line) => line.length));
+        const s = this._rect();
+        const SR = s.r2 - s.r1 + 1, SC = s.c2 - s.c1 + 1;
+        let rows = R, cols = C, tile = false;
+        if ((R === 1 && C === 1) || (SR % R === 0 && SC % C === 0 && (SR > R || SC > C))) {
+            rows = SR; cols = SC; tile = true;
+        }
+        const r0 = s.r1, c0 = s.c1;
+        const c1 = Math.min(this._cols.length - 1, c0 + cols - 1);
+        const steps = [];
+        const have = this._rowCount();
+        if (r0 + rows > have) {
+            if (this._newLine()) {
+                for (let i = have; i < r0 + rows; i++) steps.push(this._newRowStep(this._createRow({})));
+            } else {
+                rows = Math.max(0, have - r0);
+            }
+        }
+        const list = [], bad = [];
+        for (let i = 0; i < rows; i++) {
+            const row = this._rowAt(r0 + i);
+            if (!row || this._isDeleted(row)) continue;
+            const line = data[i % R];
+            for (let c = c0; c <= c1; c++) {
+                const col = this._cols[c];
+                if (col.readonly) continue;
+                const j = c - c0;
+                if (!tile && j >= line.length) continue;
+                const raw = line[j % line.length] != null ? line[j % line.length] : "";
+                const v = this._parseText(col, raw, row);
+                if (v === undefined) {
+                    bad.push({ row, col, message: t("data-grid.paste-invalid", "Not a valid value: {text}", { text: raw }) });
+                    continue;
+                }
+                const m = this._check(col, v, Object.assign({}, this._view(row), { [col.field]: v }));
+                if (m) { bad.push({ row, col, message: m }); continue; }
+                list.push({ row, col, value: v });
+            }
+        }
+        const ids = this._applyChanges(list, false);
+        if (this._lastChanges.length) steps.push({ type: "cells", changes: this._lastChanges });
+        if (steps.length) this._pushUndo(steps.length === 1 ? steps[0] : { type: "group", steps });
+        for (const b of bad) this._entryFor(b.row).errors[b.col.field] = b.message;
+        if (bad.length) {
+            this._stamp++;
+            this._announce(t("data-grid.paste-rejected", "{n} cells were not pasted.", { n: int(bad.length) }));
+        }
+        this._select({ r: r0, c: c0 }, { r: Math.max(r0, r0 + rows - 1), c: c1 }, true);
+        this._scheduleRender();
+        this._afterBulk(ids);
+    };
+
+    /** A new row without moving the cursor and without an undo step of its own. */
+    P._createRow = function (values) {
+        this._edState();
+        const key = this._keyField();
+        const vals = values && typeof values === "object" ? values : {};
+        const row = {};
+        let temp = false;
+        if (vals[key] == null) { row[key] = `new-${++tempSeq}`; temp = true; }
+        else row[key] = vals[key];
+        const e = { id: row[key], row, orig: {}, fields: {}, errors: {}, op: "create", temp };
+        for (const [f, v] of Object.entries(vals)) if (f !== key) e.fields[f] = copy(v);
+        this._creates.push(row);
+        this._edits.set(e.id, e);
+        this._stamp++;
+        this._stats = null;
+        this._extraEl._t = null;
+        return row;
+    };
+
+    P._newRowStep = function (row) {
+        const e = this._entryOf(row);
+        return { type: "add", id: e.id, row, fields: copy(e.fields), temp: e.temp };
     };
 
     /** Space, Enter or F2 on a bool cell, or a click on its box: flip it —
@@ -557,8 +662,7 @@
                 if (this._cols[cc].typeName === "bool" && this._canEdit(r, cc)) list.push({ row: rw, col: this._cols[cc], value: next });
             }
         }
-        const ids = this._applyChanges(list, true);
-        if (ids.length && this.saveMode === "cell") this._save(ids);
+        this._afterBulk(this._applyChanges(list, true));
         return true;
     };
 
@@ -861,20 +965,8 @@
         if (!this._built || !this._editable() || this.mode === "read") return null;
         this._edState();
         if (this._editor) this._commitEdit(null);
-        const key = this._keyField();
-        const vals = values && typeof values === "object" ? values : {};
-        const row = {};
-        let temp = false;
-        if (vals[key] == null) { row[key] = `new-${++tempSeq}`; temp = true; }
-        else row[key] = vals[key];
-        const e = { id: row[key], row, orig: {}, fields: {}, errors: {}, op: "create", temp };
-        for (const [f, v] of Object.entries(vals)) if (f !== key) e.fields[f] = copy(v);
-        this._creates.push(row);
-        this._edits.set(e.id, e);
-        this._pushUndo({ type: "add", id: e.id, row, fields: copy(e.fields), temp });
-        this._stamp++;
-        this._stats = null;
-        this._extraEl._t = null;
+        const row = this._createRow(values);
+        this._pushUndo(this._newRowStep(row));
         const c = opts && opts.col != null ? opts.col : Math.max(0, this._cols.findIndex((x) => !x.readonly));
         this._setCursor(this._rowCount() - 1, c, false);
         this._scheduleRender();
@@ -1007,7 +1099,8 @@
 
     /** Saved changes can no longer be undone. */
     P._dropUndo = function (id) {
-        const touches = (s) => (s.type === "cells" ? s.changes.some((ch) => ch.id === id)
+        const touches = (s) => (s.type === "group" ? s.steps.some(touches)
+            : s.type === "cells" ? s.changes.some((ch) => ch.id === id)
             : s.type === "add" ? s.id === id : s.items.some((it) => it.id === id));
         this._undo = this._undo.filter((s) => !touches(s));
         this._redo = this._redo.filter((s) => !touches(s));
@@ -1028,7 +1121,18 @@
             step = from.pop();
         }
         if (!step) return false;
-        if (step.type === "cells") {
+        this._runStep(step, redo);
+        to.push(step);
+        this._stamp++;
+        this._scheduleRender();
+        this._paintSelection();
+        return true;
+    };
+
+    P._runStep = function (step, redo) {
+        if (step.type === "group") {
+            for (const s of (redo ? step.steps : step.steps.slice().reverse())) this._runStep(s, redo);
+        } else if (step.type === "cells") {
             const list = [];
             for (const ch of step.changes) {
                 const col = this._all.find((c) => c.field === ch.field);
@@ -1038,10 +1142,10 @@
             }
             const ids = this._applyChanges(list, false);
             const first = step.changes[0];
-            const r = this._indexOfId(first.id);
-            const c = this._cols.findIndex((x) => x.field === first.field);
+            const r = first ? this._indexOfId(first.id) : -1;
+            const c = first ? this._cols.findIndex((x) => x.field === first.field) : -1;
             if (r >= 0 && c >= 0) this._setCursor(r, c, false);
-            if (this.saveMode === "cell" && ids.length) this._save(ids);
+            this._afterBulk(ids);
         } else if (step.type === "add") {
             if (redo) {
                 const e = { id: step.id, row: step.row, orig: {}, fields: copy(step.fields), errors: {}, op: "create", temp: step.temp };
@@ -1055,11 +1159,6 @@
             if (redo) this._applyDelete(step);
             else this._restoreDelete(step);
         }
-        to.push(step);
-        this._stamp++;
-        this._scheduleRender();
-        this._paintSelection();
-        return true;
     };
 
     /* -------------------------------------------------------- row menu -- */

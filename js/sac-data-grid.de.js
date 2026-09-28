@@ -80,6 +80,23 @@
         "data-grid.revert": "Verwerfen",
         "data-grid.save": "Speichern",
 
+        "data-grid.paste-invalid": "Kein gültiger Wert: {text}",
+        "data-grid.paste-rejected": "{n} Zellen wurden nicht eingefügt.",
+
+        "data-grid.record": "Datensatz {n}",
+        "data-grid.record-of": "Datensatz {n} von {m}",
+        "data-grid.new-record": "Neuer Datensatz",
+        "data-grid.previous": "Vorheriger",
+        "data-grid.next": "Nächster",
+        "data-grid.new": "Neu",
+        "data-grid.close": "Schließen",
+        "data-grid.cancel": "Abbrechen",
+        "data-grid.form-errors": "Bitte die markierten Felder korrigieren.",
+        "data-grid.mode": "Bearbeitungsmodus",
+        "data-grid.mode-read": "Lesen",
+        "data-grid.mode-sheet": "Tabelle",
+        "data-grid.mode-form": "Formular",
+
         "data-grid.copy": "Kopieren",
         "data-grid.copy-wait": "Einige Zeilen werden noch geladen – bitte gleich noch einmal versuchen.",
         "data-grid.copy-failed": "Kopieren ist fehlgeschlagen.",
