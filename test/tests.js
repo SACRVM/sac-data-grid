@@ -796,4 +796,63 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(hosts, ["sac-number-field", "sac-date-field", "sac-time-field", "sac-date-field", "sac-time-field",
             "input", "sac-select", "sac-chip-input", "sac-color-field", "textarea"]);
     });
+    test("source.create saves new rows and hands back the real id", async (p) => {
+        await p.load("/test/fixture.html?rows=3&create=1");
+        await p.eval("fx.focusGrid()");
+        await p.key("End", ["Control"]);
+        await p.key("ArrowDown");
+        await p.key("Home");
+        await p.key("ArrowRight");
+        await p.type("Cre");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("[fx.source.rows.length, fx.source.rows[3].name, fx.source.rows[3].id]"), [4, "Cre", 4]);
+        eq(await saves(p), [], "create(), not save()");
+        eq(await p.eval("fx.cell(3, 0)"), "4", "the real id shown");
+        eq(await p.eval("fx.grid.dirty"), 0);
+    });
+
+    test("async source: an edit saves after the round trip", async (p) => {
+        await p.load("/test/fixture.html?rows=120&source=server");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        await p.type("srv");
+        await p.key("Enter");
+        await p.eval("new Promise(r => setTimeout(r, 120))");
+        await settle(p);
+        eq(await p.eval("[fx.data[1].w1, fx.grid.dirty, fx.cell(1, 11)]"), ["srv", 0, "srv"]);
+    });
+
+    test("custom column types and inline: false", async (p) => {
+        await p.load("/test/fixture.html?rows=5&save-mode=batch");
+        await p.eval(`fx.grid.columns = [
+            { field: "id", label: "ID", type: "readonly", width: 60 },
+            { field: "stars", label: "Stars", type: {
+                render: (v) => "★".repeat(v || 0),
+                format: (v) => String(v || 0),
+                parse: (t) => { const n = parseInt(t, 10); if (!(n >= 0 && n <= 5)) throw new Error("0-5"); return n; },
+                editor: (cell) => { const i = document.createElement("input"); i.className = "cell-input"; i.value = String(cell.value || 0); return i; },
+            } },
+            { field: "name", label: "Name", type: "text", inline: false },
+        ]`);
+        await settle(p);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'stars')");
+        await p.key("Enter");
+        eq(await p.eval("fx.activeTag()"), "input.cell-input", "the custom editor");
+        await p.key("a", ["Control"]);
+        await p.type("3");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.grid._get(fx.data[0], fx.grid._cols[1])"), 3, "parse() made it a number");
+        eq(await p.eval("fx.cell(0, 1)"), "★★★", "render()");
+        await p.eval("fx.grid.focusCell(1, 'stars')");
+        eq(await p.eval("fx.copyText()"), "3", "format() for the clipboard");
+        await p.eval(`fx.pasteText("9")`);
+        await settle(p);
+        eq(await p.eval("[fx.grid._get(fx.data[0], fx.grid._cols[1]), fx.cellEl(0, 1).classList.contains('invalid')]"), [3, true], "parse() rejects");
+        await p.eval("fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        ok(await dialogOpen(p), "inline: false edits in the record form");
+        await p.key("Escape");
+    });
 };

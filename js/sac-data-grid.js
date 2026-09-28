@@ -107,7 +107,8 @@
     const SAVE_MODES = ["cell", "row", "batch"];
     const AGGREGATES = ["sum", "avg", "count", "min", "max"];
     const STATS_CELL_CAP = 2000000;   // selection stats stop scanning past this
-    const STATS_BLOCK_CAP = 50;       // …and load at most this many missing blocks
+    const STATS_BLOCK_CAP = 20;       // …and load at most this many missing blocks (a local
+                                      // source's 100k rows are 20 blocks; a server's are not loaded)
 
     let instances = 0;
 
@@ -937,6 +938,7 @@ class SacDataGrid extends HTMLElement {
 
     /** Recompute the visible column list and rebuild what depends on it. */
     _visible() {
+        if (this._editor) this._commitEdit(null);          // its cell is about to go
         let cols = this._all.filter((c) => !this._hidden.has(c.field));
         if (!cols.length && this._all.length) {       // never hide the last one
             this._hidden.delete(this._all[0].field);
@@ -2286,6 +2288,7 @@ class SacDataGrid extends HTMLElement {
     }
 
     _setSort(sort) {
+        if (this._editor) this._commitEdit(null);          // before the row is saved and reloaded
         if (this._leaveRow) this._leaveRow(this._cur.r);
         this._sort = sort;
         this._paintHead();
@@ -2298,6 +2301,7 @@ class SacDataGrid extends HTMLElement {
         if (desc) this._filter[field] = desc;
         else delete this._filter[field];
         if (JSON.stringify(desc || null) === had) return;
+        if (this._editor) this._commitEdit(null);
         if (this._leaveRow) this._leaveRow(this._cur.r);
         this._page = 0;
         this._paintHead();

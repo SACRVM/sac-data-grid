@@ -552,6 +552,7 @@
             }
             if (typeof spec.parse === "function") {
                 type.parse = (text) => { try { return spec.parse(text); } catch (err) { return undefined; } };
+                type.customParse = true;
             }
             if (typeof spec.editor === "function") {
                 type.plainEditor = false;

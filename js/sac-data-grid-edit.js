@@ -280,6 +280,13 @@
         let v;
         try { v = ed.el.value; } catch (err) { v = ed.start; }
         if (type.fromEditor) v = type.fromEditor(v, col);
+        // A custom editor built on a plain input hands back text: the type's
+        // (or the column's) parse turns it into the value.
+        if (ed.kind === "custom" && typeof v === "string" && (type.customParse || typeof col.def.parse === "function")) {
+            const parsed = this._parseText(col, v, ed.row);
+            if (parsed === undefined) return { error: t("data-grid.invalid", "Not a valid value") };
+            v = parsed;
+        }
         return { value: v === undefined ? ed.start : v };
     };
 
