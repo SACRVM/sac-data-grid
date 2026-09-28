@@ -74,7 +74,8 @@ collaboration, row detail expansion.
 | Home / End, Ctrl+Home / Ctrl+End | Row start/end, grid start/end | editor |
 | PgUp / PgDn | Page | — |
 | Tab / Shift+Tab | Next/previous cell, wraps to next/previous row | Commit, then move |
-| Enter / Shift+Enter | Start editing (keep value) / open the record form | Commit, move down/up |
+| Enter | `sheet`: start editing (keep value) · `form`/`read`: open the record form (read-only in `read`) | Commit, move down |
+| Shift+Enter | Open the record form (every mode) | Commit, move up |
 | F2 | Start editing (keep value, caret at end) | — |
 | Printable key | Start editing, **replace** value with the key | editor |
 | Esc | Clear range to cursor | Cancel edit, restore value |
