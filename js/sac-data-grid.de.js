@@ -1,0 +1,72 @@
+/**
+ * sac-data-grid — its UI strings in German.
+ *
+ * English lives inline in the grid as the fallback; this table only adds
+ * German, the same way the kit ships kit/js/i18n/de.js. Load it after the
+ * kit's globals.js (it waits for sac:ready when the kit is injected by
+ * all.js and arrives later).
+ */
+(function () {
+    const table = {
+        "data-grid.label": "Datentabelle",
+        "data-grid.yes": "Ja",
+        "data-grid.no": "Nein",
+        "data-grid.any": "Alle",
+        "data-grid.select-all": "Alles auswählen",
+        "data-grid.row-number": "Zeile",
+        "data-grid.column-menu": "Spaltenmenü",
+        "data-grid.filtered": "Gefiltert",
+        "data-grid.loading": "Wird geladen …",
+        "data-grid.retry": "Erneut versuchen",
+        "data-grid.load-failed": "Zeilen konnten nicht geladen werden.",
+        "data-grid.empty": "Keine Zeilen",
+
+        "data-grid.agg-sum": "Summe",
+        "data-grid.agg-avg": "Mittel",
+        "data-grid.agg-count": "Anzahl",
+        "data-grid.agg-min": "Min",
+        "data-grid.agg-max": "Max",
+
+        "data-grid.rows-one": "1 Zeile",
+        "data-grid.rows": "{n} Zeilen",
+        "data-grid.rows-more": "{n}+ Zeilen",
+        "data-grid.count": "Anzahl: {n}",
+        "data-grid.sum": "Summe: {n}",
+        "data-grid.avg": "Mittelwert: {n}",
+        "data-grid.partial": "(nur geladene Zeilen)",
+
+        "data-grid.pages": "Seiten",
+        "data-grid.page": "Seite {n}",
+        "data-grid.page-of": "Seite {n} von {m}",
+        "data-grid.first-page": "Erste Seite",
+        "data-grid.prev-page": "Vorige Seite",
+        "data-grid.next-page": "Nächste Seite",
+        "data-grid.last-page": "Letzte Seite",
+
+        "data-grid.sort-asc": "Aufsteigend sortieren",
+        "data-grid.sort-desc": "Absteigend sortieren",
+        "data-grid.sort-clear": "Sortierung aufheben",
+        "data-grid.filter": "Filtern …",
+        "data-grid.filter-title": "{label} filtern",
+        "data-grid.filter-clear": "Filter entfernen",
+        "data-grid.contains": "Enthält …",
+        "data-grid.from": "Von",
+        "data-grid.to": "Bis",
+        "data-grid.done": "Fertig",
+        "data-grid.select-column": "Spalte auswählen",
+        "data-grid.fit-width": "Breite anpassen",
+        "data-grid.hide-column": "Spalte ausblenden",
+        "data-grid.show-column": "{label} einblenden",
+        "data-grid.show-all": "Alle Spalten einblenden",
+
+        "data-grid.copy": "Kopieren",
+        "data-grid.copy-wait": "Einige Zeilen werden noch geladen – bitte gleich noch einmal versuchen.",
+        "data-grid.copy-failed": "Kopieren ist fehlgeschlagen.",
+    };
+
+    const add = () => {
+        if (window.sac && sac.i18n && typeof sac.i18n.add === "function") { sac.i18n.add("de", table); return true; }
+        return false;
+    };
+    if (!add()) document.addEventListener("sac:ready", add, { once: true });
+})();
