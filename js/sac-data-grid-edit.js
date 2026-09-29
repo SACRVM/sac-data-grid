@@ -53,22 +53,6 @@
         }
     }
 
-    const connected = P.connectedCallback;
-    P.connectedCallback = function () {
-        this._edState();
-        connected.call(this);
-        if (!this._edHooked) {
-            this._edHooked = true;
-            this.addEventListener("focusout", (e) => this._onFocusOut(e));
-            this._compactMq = matchMedia(COMPACT);
-            this._compactMq.addEventListener("change", () => {
-                if (this._editor && this._compact()) this._commitEdit(null);
-                this._stamp++;
-                this._scheduleRender();
-            });
-        }
-    };
-
     P._edState = function () {
         if (this._edits) return;
         this._edits = new Map();        // id → { id, row, orig, fields, errors, op, … }
@@ -1235,4 +1219,26 @@
         }
         box.hidden = !box.firstChild;
     };
+
+    /* ---------------------------------------------------------- lifecycle -- */
+
+    Grid.hook("connect", function () {
+        this._edState();
+        if (!this._edHooked) {
+            this._edHooked = true;
+            this.addEventListener("focusout", (e) => this._onFocusOut(e));
+            this._compactMq = matchMedia(COMPACT);
+            this._onCompact = () => {
+                if (this._editor && this._compact()) this._commitEdit(null);
+                this._stamp++;
+                this._scheduleRender();
+            };
+        }
+        this._compactMq.addEventListener("change", this._onCompact);
+    });
+
+    Grid.hook("disconnect", function () {
+        if (this._editor) this._commitEdit(null);
+        if (this._compactMq) this._compactMq.removeEventListener("change", this._onCompact);   // no leak per removed grid
+    });
 })();

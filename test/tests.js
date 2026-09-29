@@ -855,4 +855,110 @@ module.exports = function ({ test, eq, ok, center }) {
         ok(await dialogOpen(p), "inline: false edits in the record form");
         await p.key("Escape");
     });
+    /* ------------------------------------------------------------- polish -- */
+
+    test("column menu works from the keyboard", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'n')");
+        await p.key("ArrowDown", ["Alt"]);
+        await p.frames(2);
+        ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "Alt+↓ opens the column menu");
+        await p.key("ArrowDown");
+        await p.key("ArrowDown");
+        eq(await p.eval("document.activeElement.dataset.action"), "sort-desc", "arrows move through the items");
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "desc" }]);
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "focus back on the grid");
+        eq((await p.eval("fx.state()")).cur.r, 0, "the grid's cursor did not move");
+    });
+
+    test("filter popover: follows its column, closes when focus leaves", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.grid._openFilter(3)");
+        await p.frames(3);
+        const before = await p.eval("fx.rect(fx.grid._pop).x");
+        await p.eval("fx.grid._scroller.scrollLeft = 60");
+        await p.frames(3);
+        const after = await p.eval("fx.rect(fx.grid._pop).x");
+        ok(Math.abs(before - 60 - after) < 2, `moved with the header: ${before} → ${after}`);
+        ok(await p.eval("fx.grid._pop.matches(':popover-open')"), "still open while focus is inside");
+        await p.eval("fx.grid._scroller.focus()");
+        await p.frames(2);
+        eq(await p.eval("fx.grid._pop.matches(':popover-open')"), false, "focus leaving closed it");
+    });
+
+    test("form: Escape with changes asks, Keep editing restores them", async (p) => {
+        await p.load("/test/fixture.html?rows=10&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.key("a", ["Control"]);
+        await p.type("Changed");
+        await p.key("Escape");
+        await p.frames(4);
+        eq(await p.eval("document.querySelector('sac-dialog[open]').getAttribute('title')"), "Discard your changes?", "asks");
+        await p.eval("document.querySelector('sac-dialog[open]').trigger('keep')");
+        await p.frames(4);
+        eq(await p.eval("fx.grid._formState && fx.grid._formState.fields[1].focus.value"), "Changed", "reopened with the typed text");
+        await p.key("Escape");
+        await p.frames(4);
+        await p.eval("document.querySelector('sac-dialog[open]').trigger('discard')");
+        await p.frames(4);
+        eq([await dialogOpen(p), await p.eval("fx.data[1].name")], [false, "Ben 2"], "discard drops them");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.eval("document.querySelector('sac-dialog[open]').trigger('cancel')");
+        await p.frames(3);
+        ok(!(await dialogOpen(p)), "an explicit Cancel does not ask");
+    });
+
+    test("form: a language switch relabels it and keeps the typed text", async (p) => {
+        await p.load("/test/fixture.html?rows=10&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.key("a", ["Control"]);
+        await p.type("Typed");
+        await p.eval("sac.lang.set('de')");
+        await p.frames(3);
+        try {
+            eq(await p.eval("fx.grid._formState.nav.querySelector('button').textContent"), "Vorheriger", "German");
+            eq(await p.eval("fx.grid._formState.fields[1].focus.value"), "Typed", "kept");
+            eq(await p.eval("document.activeElement === fx.grid._formState.fields[1].focus"), true, "focus kept");
+        } finally {
+            await p.eval("sac.lang.set('en')");
+        }
+        await p.eval("document.querySelector('sac-dialog[open]').trigger('cancel')");
+    });
+
+    test("removing the grid closes its form and menu", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.eval("fx.grid.remove()");
+        await p.frames(2);
+        eq(await p.eval("[!!document.querySelector('sac-dialog'), !!document.querySelector('sac-menu')]"), [false, false]);
+    });
+
+    test("an empty grid still shows focus", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=read");
+        await p.eval(`fx.grid.view = { filter: { name: { op: "contains", value: "nobody" } } }`);
+        await settle(p);
+        eq(await p.eval("fx.note()"), "No rows");
+        ok(await p.eval("fx.grid._scroller.classList.contains('empty')"), "empty class for the focus ring");
+    });
+    test("row mode saves the row when focus leaves the grid", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        await p.type("away");
+        await p.key("Tab");
+        await settle(p);
+        eq(await saves(p), [], "still in the row: not saved yet");
+        await p.eval("document.body.appendChild(Object.assign(document.createElement('input'), { id: 'outside' })).focus()");
+        await p.eval("new Promise(r => setTimeout(r, 50))");
+        await settle(p);
+        eq([(await saves(p)).length, await p.eval("fx.data[1].w1"), await p.eval("fx.grid.dirty")], [1, "away", 0]);
+    });
 };

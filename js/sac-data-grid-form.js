@@ -13,6 +13,8 @@
  *
  * The form commits one record — one entry in source.save(changes) — through
  * the grid's own validation, dirty tracking and save mode. Ctrl+Enter saves.
+ * Escape or a click beside it with changes in the form asks before they are
+ * thrown away; the explicit Cancel does not ask.
  *
  * The dialog lives in the document (not in the grid's shadow root): its
  * focus trap and the kit's form styles work on light-DOM content only.
@@ -31,6 +33,9 @@
     };
     const int = (n) => (window.sac && sac.regional) ? sac.regional.formatNumber(n) : String(n);
     const Types = () => window.SacDataGridTypes;
+    const isBlank = (v) => v == null || v === "" || (Array.isArray(v) && !v.length);
+    const same = (a, b) => a === b || (isBlank(a) && isBlank(b))
+        || (a != null && b != null && typeof a === "object" && JSON.stringify(a) === JSON.stringify(b));
     let uid = 0;
 
     // Light-DOM content needs light-DOM rules; namespaced, tokens only.
@@ -59,8 +64,15 @@
         document.head.appendChild(s);
     }
 
+    const warned = new Set();
     function kit(tag, attrs) {
-        if (!customElements.get(tag)) return null;
+        if (!customElements.get(tag)) {
+            if (!warned.has(tag)) {
+                warned.add(tag);
+                console.warn(`[sac-data-grid] <${tag}> is not loaded: the form uses a text input (SACRVM APPKIT ≥ 2.21.0).`);
+            }
+            return null;
+        }
         const el = document.createElement(tag);
         for (const [k, v] of Object.entries(attrs || {})) {
             if (v != null && v !== false) el.setAttribute(k, v === true ? "" : String(v));
@@ -72,9 +84,7 @@
 
     const prevDblClick = P._onCellDblClick;
     P._onCellDblClick = function (r, c, e) {
-        if (r >= this._rowCount()) {
-            if (this.mode === "form" || this._compact()) { this._openRecord(r); return; }
-        }
+        if (r >= this._rowCount() && (this.mode === "form" || this._compact())) { this._openRecord(r); return; }
         return prevDblClick.call(this, r, c, e);
     };
 
@@ -86,8 +96,24 @@
     const prevModeChanged = P._onModeChanged;
     P._onModeChanged = function () {
         prevModeChanged.call(this);
-        if (this._formState && this._formState.readOnly !== !this._formEditable()) this._formFill(this._formState.r);
+        const st = this._formState;
+        if (st && st.readOnly !== !this._formEditable()) this._formRefill();
     };
+
+    /** A language switch relabels an open form, keeping what was typed. */
+    const prevRelabel = P._onRelabel;
+    P._onRelabel = function () {
+        prevRelabel.call(this);
+        if (this._formState) this._formRefill();
+    };
+
+    Grid.hook("disconnect", function () {
+        const st = this._formState;
+        if (!st) return;
+        this._formState = null;
+        if (typeof st.dlg.close === "function") st.dlg.close(null);
+        st.dlg.remove();
+    });
 
     P._formEditable = function () {
         if (!this._editable() || this.mode === "read") return false;
@@ -97,8 +123,9 @@
     /* -------------------------------------------------------------- open -- */
 
     /** Open display row r (default: the cursor's) in the record form. On the
-     *  "new row" line (or past the rows) it opens a new record. */
-    P._openRecord = function (r) {
+     *  "new row" line (or past the rows) it opens a new record. `restore`:
+     *  field states to put back (a reopened form). */
+    P._openRecord = function (r, restore) {
         if (!this._built || !this._cols.length || this._formState) return;
         if (this._editor) this._commitEdit(null);
         if (r == null) r = this._cur.r;
@@ -118,7 +145,7 @@
         const st = { dlg, nav, form, r, row: null, fields: [], readOnly: true, uid: ++uid };
         this._formState = st;
         dlg.beforeAction = async (action) => (action === "save" ? this._formCommit(false) : true);
-        dlg.addEventListener("sac:action", (e) => this._formClosed(e.detail ? e.detail.action : null));
+        dlg.addEventListener("sac:action", (e) => this._formClosed(st, e.detail ? e.detail.action : null));
         dlg.addEventListener("keydown", (e) => {
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !st.readOnly) {
                 e.preventDefault();
@@ -127,6 +154,7 @@
             }
         });
         this._formFill(r);
+        if (restore) this._formRestore(restore);
         document.body.appendChild(dlg);
         dlg.open();
         requestAnimationFrame(() => {
@@ -199,7 +227,53 @@
             ];
     };
 
-    /** One labelled field: { col, wrap, get(), focus, err } (get null = shown only). */
+    /** Rebuild the open form in place (language, mode), keeping typed values
+     *  and the focused field. */
+    P._formRefill = function () {
+        const st = this._formState;
+        if (!st) return;
+        const snap = this._formSnapshot();
+        const at = st.fields.findIndex((f) => f.focus && (f.focus === document.activeElement || f.focus.contains(document.activeElement)));
+        const r = this._indexOfId(this._idOf(st.row));
+        this._formFill(r >= 0 ? r : st.r);
+        this._formRestore(snap);
+        if (at >= 0 && st.fields[at] && st.fields[at].focus) st.fields[at].focus.focus();
+    };
+
+    /** field → what the user has in it (text for a plain input). */
+    P._formSnapshot = function () {
+        const st = this._formState;
+        const out = {};
+        if (!st) return out;
+        for (const f of st.fields) if (f.snap) out[f.col.field] = f.snap();
+        return out;
+    };
+
+    P._formRestore = function (snap) {
+        const st = this._formState;
+        if (!st || st.readOnly || !snap) return;
+        for (const f of st.fields) {
+            if (f.restore && Object.prototype.hasOwnProperty.call(snap, f.col.field)) f.restore(snap[f.col.field]);
+        }
+    };
+
+    /** Does the form hold anything the row does not? */
+    P._formDirty = function () {
+        const st = this._formState;
+        if (!st || st.readOnly) return false;
+        for (const f of st.fields) {
+            if (!f.get) continue;
+            const res = f.get();
+            if (res.error || !same(res.value, this._get(st.row, f.col))) return true;
+        }
+        return false;
+    };
+
+    /**
+     * One labelled field: { col, wrap, get(), snap(), restore(s), focus, err }.
+     * get → { value } or { error }; snap / restore carry the raw state (the
+     * text of a plain input, the value of a kit field). get null = shown only.
+     */
     P._formField = function (col, row, value, view, st) {
         const T = Types();
         const wrap = document.createElement("div");
@@ -213,7 +287,7 @@
             if (forId) l.htmlFor = forId;
             return l;
         };
-        const f = { col, wrap, get: null, focus: null, err: null };
+        const f = { col, wrap, get: null, snap: null, restore: null, focus: null, err: null };
         const type = col.type;
         const name = col.typeName;
 
@@ -225,9 +299,18 @@
             return f;
         }
 
-        let input = null;
+        // A kit field whose value is the column's value (type conversions in
+        // and out); `into` and `out` default to the identity.
+        const field = (el, into, out) => {
+            el.value = into ? into(value) : value;
+            f.focus = el;
+            f.get = () => ({ value: out ? out(el.value) : el.value });
+            f.snap = () => el.value;
+            f.restore = (s) => { el.value = s; };
+            return el;
+        };
         const plain = (multi) => {
-            input = document.createElement(multi ? "textarea" : "input");
+            const input = document.createElement(multi ? "textarea" : "input");
             if (!multi) input.type = "text";
             input.id = id;
             input.value = (type.plainEditor || type.longEditor) ? (value == null ? "" : String(value)) : col.copy(value, row);
@@ -240,35 +323,33 @@
                 const v = this._parseText(col, s, row);
                 return v === undefined ? { error: t("data-grid.invalid", "Not a valid value") } : { value: v };
             };
+            f.snap = () => input.value;
+            f.restore = (s) => { input.value = s; };
         };
-
         const reg = (tag, attrs) => kit(tag, Object.assign({ size: "regular", label: label + (col.required && !ro ? " *" : ""), disabled: ro }, attrs));
+
+        let el;
         if (type.customEditor && !ro) {
-            let el = null;
             try { el = type.customEditor({ value, row: view, field: col.field, column: col.def }); } catch (err) { el = null; }
             if (el) {
-                wrap.append(caption(), el);
-                f.focus = el;
-                f.get = () => ({ value: el.value });
+                wrap.append(caption());
+                wrap.append(field(el, null, (v) => {
+                    if (typeof v === "string" && (type.customParse || typeof col.def.parse === "function")) {
+                        const p = this._parseText(col, v, row);
+                        return p === undefined ? v : p;
+                    }
+                    return v;
+                }));
             } else plain(false);
         } else if (name === "longtext") {
             plain(true);
             wrap.classList.add("sdg-wide");
-        } else if (name === "number" && (input = reg("sac-number-field", { decimals: col.decimals, min: col.min, max: col.max, step: col.step }))) {
-            input.value = value;
-            wrap.append(input);
-            f.focus = input;
-            f.get = () => ({ value: input.value });
-        } else if (name === "date" && (input = reg("sac-date-field", { min: col.min && T.normDate(col.min), max: col.max && T.normDate(col.max) }))) {
-            input.value = T.normDate(value);
-            wrap.append(input);
-            f.focus = input;
-            f.get = () => ({ value: input.value || "" });
-        } else if (name === "time" && (input = reg("sac-time-field", { step: col.step }))) {
-            input.value = T.normTime(value);
-            wrap.append(input);
-            f.focus = input;
-            f.get = () => ({ value: input.value || "" });
+        } else if (name === "number" && (el = reg("sac-number-field", { decimals: col.decimals, min: col.min, max: col.max, step: col.step }))) {
+            wrap.append(field(el));
+        } else if (name === "date" && (el = reg("sac-date-field", { min: col.min && T.normDate(col.min), max: col.max && T.normDate(col.max) }))) {
+            wrap.append(field(el, T.normDate, (v) => v || ""));
+        } else if (name === "time" && (el = reg("sac-time-field", { step: col.step }))) {
+            wrap.append(field(el, T.normTime, (v) => v || ""));
         } else if (name === "datetime" && customElements.get("sac-date-field") && customElements.get("sac-time-field")) {
             const s = T.normDateTime(value);
             const d = reg("sac-date-field", {});
@@ -281,8 +362,10 @@
             wrap.append(pair);
             f.focus = d;
             f.get = () => ({ value: d.value ? `${d.value}T${tm.value || "00:00"}` : "" });
+            f.snap = () => [d.value, tm.value];
+            f.restore = (st2) => { d.value = st2[0]; tm.value = st2[1]; };
         } else if (name === "bool") {
-            input = document.createElement("input");
+            const input = document.createElement("input");
             input.type = "checkbox";
             input.id = id;
             input.checked = !!value;
@@ -290,33 +373,26 @@
             wrap.append(caption(id), input);
             f.focus = input;
             f.get = () => ({ value: input.checked });
-        } else if (name === "select" && (input = reg("sac-select", {}))) {
-            input.options = col.options.map((o) => ({ value: String(o.value), label: T.optionLabel(o) }));
-            input.value = value == null ? "" : String(value);
-            wrap.append(input);
-            f.focus = input;
-            f.get = () => ({ value: type.fromEditor(input.value, col) });
-        } else if (name === "tags" && (input = kit("sac-chip-input", { "allow-create": col.allowCreate !== false, "aria-label": label }))) {
-            input.suggestions = col.options.map((o) => ({ name: String(o.value), color: o.color || "gray" }));
-            input.value = Array.isArray(value) ? value.slice() : [];
-            if (ro) input.setAttribute("disabled", "");
-            wrap.append(caption(), input);
+            f.snap = () => input.checked;
+            f.restore = (s) => { input.checked = !!s; };
+        } else if (name === "select" && (el = reg("sac-select", {}))) {
+            el.options = col.options.map((o) => ({ value: String(o.value), label: T.optionLabel(o) }));
+            wrap.append(field(el, (v) => (v == null ? "" : String(v)), (v) => type.fromEditor(v, col)));
+        } else if (name === "tags" && (el = kit("sac-chip-input", { "allow-create": col.allowCreate !== false, "aria-label": label }))) {
+            el.suggestions = col.options.map((o) => ({ name: String(o.value), color: o.color || "gray" }));
+            if (ro) el.setAttribute("disabled", "");
+            wrap.append(caption());
+            wrap.append(field(el, (v) => (Array.isArray(v) ? v.slice() : []), (v) => (Array.isArray(v) ? v.slice() : [])));
             wrap.classList.add("sdg-wide");
-            f.focus = input;
-            f.get = () => ({ value: Array.isArray(input.value) ? input.value.slice() : [] });
-        } else if (name === "color" && (input = kit("sac-color-field", { label, disabled: ro }))) {
-            input.value = T.normColor(value);
-            wrap.append(input);
-            f.focus = input;
-            f.get = () => ({ value: input.value || "" });
+        } else if (name === "color" && (el = kit("sac-color-field", { label, disabled: ro }))) {
+            wrap.append(field(el, T.normColor, (v) => v || ""));
         } else {
             plain(false);
         }
-        if (ro) f.get = null;
+        if (ro) { f.get = null; f.snap = null; f.restore = null; }
         // sac-dialog's focus trap only cycles native focusables, so Tab would
-        // skip the kit fields. A tabindex puts them in its list; the trap
-        // focuses them through their own focus() (the inner input). Remove
-        // once the kit's trap sees custom elements.
+        // skip the kit fields (SACRVM/sacrvm-appkit#29). A tabindex puts them
+        // in its list; the trap focuses them through their own focus().
         for (const k of wrap.querySelectorAll("*")) {
             if (!k.localName.startsWith("sac-") || k.localName === "sac-icon" || k.hasAttribute("disabled")) continue;
             k.tabIndex = 0;
@@ -366,7 +442,7 @@
         }
         const e0 = this._entryOf(row);
         if (forNav && e0 && e0.op === "create" && !Object.keys(e0.fields).length
-            && Object.values(values).every((v) => v == null || v === "" || v === false || (Array.isArray(v) && !v.length))) {
+            && Object.values(values).every((v) => isBlank(v) || v === false)) {
             this._dropCreate(e0.id);
             return true;
         }
@@ -421,15 +497,38 @@
         }
     };
 
-    P._formClosed = function (action) {
-        const st = this._formState;
-        if (!st) return;
+    /** After the dialog closed. Escape or the backdrop with changes in the
+     *  form ask first ("Keep editing" reopens it as it was). */
+    P._formClosed = function (st, action) {
+        if (this._formState !== st) return;
+        const dirty = action == null && this._formDirty();
+        const snap = dirty ? this._formSnapshot() : null;
         this._formState = null;
-        // A new record that was never filled in does not stay behind.
-        const e = this._entryOf(st.row);
-        if (action !== "save" && e && e.op === "create" && !Object.keys(e.fields).length) this._dropCreate(e.id);
         setTimeout(() => st.dlg.remove(), 400);
+        const dropIfEmpty = () => {
+            // A new record that was never filled in does not stay behind.
+            const e = this._entryOf(st.row);
+            if (e && e.op === "create" && !Object.keys(e.fields).length) this._dropCreate(e.id);
+        };
         this._stamp++;
         this._scheduleRender();
+        if (!dirty || !(window.sac && sac.dialog && typeof sac.dialog.confirm === "function")) {
+            if (action !== "save") dropIfEmpty();
+            return;
+        }
+        sac.dialog.confirm({
+            title: t("data-grid.discard-title", "Discard your changes?"),
+            message: t("data-grid.discard-message", "This record has changes that are not saved yet."),
+            buttons: [
+                { action: "discard", label: t("data-grid.discard", "Discard"), kind: "destructive" },
+                { action: "keep", label: t("data-grid.keep-editing", "Keep editing"), kind: "primary" },
+            ],
+        }).then((answer) => {
+            if (answer === "keep") {
+                const r = this._indexOfId(this._idOf(st.row));
+                if (r >= 0) { this._openRecord(r, snap); return; }
+            }
+            dropIfEmpty();
+        });
     };
 })();

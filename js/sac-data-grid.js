@@ -451,16 +451,16 @@
         .status {
             flex: none;
             display: flex;
+            flex-wrap: wrap;                 /* a narrow grid stacks them, never hides a Save */
             align-items: center;
-            gap: 14px;
+            gap: 2px 14px;
             min-height: 32px;
-            padding: 0 8px 0 12px;
+            padding: 3px 8px 3px 12px;
             border-top: 1px solid var(--border);
             font-size: 0.75rem;
             color: var(--text-muted);
             font-variant-numeric: tabular-nums;
             white-space: nowrap;
-            overflow: hidden;
         }
         .status .spacer { flex: 1 1 auto; }
         .status .selinfo { overflow: hidden; text-overflow: ellipsis; }
@@ -579,15 +579,31 @@
             border: 0;
         }
 
+        .pop:focus { outline: none; }
+        /* An empty grid has no cursor cell to show that it has focus. */
+        .scroller.empty:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
         @media (pointer: coarse) {
             .field { min-height: 44px; font-size: max(16px, 1rem); }
             .pager button { min-width: 44px; height: 44px; }
             .opt { min-height: 44px; }
             .btn { height: 44px; }
+            .hcell .mbtn { min-width: 44px; height: 44px; }
         }
         @media (prefers-reduced-motion: reduce) {
             .row.skel .cell::after { animation: none; }
             .mbtn, .btn { transition: none; }
+        }
+        /* Windows high contrast: shadows and background images are dropped,
+           so the cursor, the range and the cell states need system colors. */
+        @media (forced-colors: active) {
+            .cell.cur, .scroller:focus .cell.cur { outline: 2px solid Highlight; outline-offset: -2px; }
+            .cell.sel, .rh.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+            .cell.dirty { text-decoration: underline dotted; }
+            .cell.invalid { outline: 2px dashed CanvasText; outline-offset: -3px; }
+            .bool { border: 1px solid CanvasText; }
+            .bool.on { forced-color-adjust: none; background-color: CanvasText; }
+            .hcell.sel { text-decoration: underline; }
         }
     `;
 
@@ -674,9 +690,11 @@ class SacDataGrid extends HTMLElement {
         document.addEventListener("paste", this._onDocCopy);
         this._metrics();
         this._measure();
+        runHooks(this, "connect");
     }
 
     disconnectedCallback() {
+        runHooks(this, "disconnect");
         if (this._offLang) { this._offLang(); this._offLang = null; }
         if (this._offReg) { this._offReg(); this._offReg = null; }
         if (this._coarse) this._coarse.removeEventListener("change", this._onCoarse);
@@ -686,6 +704,10 @@ class SacDataGrid extends HTMLElement {
         document.removeEventListener("paste", this._onDocCopy);
         if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
         this._closeFilter();
+        if (this._menu && this._menu.isConnected) {
+            if (typeof this._menu.close === "function") this._menu.close();
+            this._menu.remove();
+        }
     }
 
     attributeChangedCallback(name, old, value) {
@@ -835,11 +857,17 @@ class SacDataGrid extends HTMLElement {
         this._pager = $(".pager");
         this._live = $(".live");
         this._pop = $(".pop");
+        // The menu lives in the document while open: sac-menu steps its
+        // arrow-key focus by document.activeElement, which inside this shadow
+        // root would always be the grid itself.
         this._menu = document.createElement("sac-menu");
-        this.shadowRoot.appendChild(this._menu);
+        this._menu.style.position = "fixed";
         this._menu.addEventListener("sac:select", (e) => {
             e.stopPropagation();
             const fn = this._menuActions && this._menuActions[e.detail && e.detail.action];
+            // Focus comes home first (the menu leaves it on its hidden item);
+            // an action that opens something (a filter, a form) takes it on.
+            this._scroller.focus({ preventScroll: true });
             if (fn) fn();
         });
         // Keep the column's menu button shown while its menu is open.
@@ -1413,6 +1441,7 @@ class SacDataGrid extends HTMLElement {
         const note = this._note(rows);
         this._nl = this._newLine ? this._newLine() : 0;
         const n = rows + this._nl + (note ? 1 : 0);
+        this._scroller.classList.toggle("empty", !rows && !this._nl);
         const h = n * this._rowH;
         if (this._bodyH !== h) {
             this._bodyH = h;
@@ -2353,6 +2382,7 @@ class SacDataGrid extends HTMLElement {
 
     _openMenu(items, point) {
         const menu = this._menu;
+        if (!menu.isConnected) document.body.appendChild(menu);
         menu.replaceChildren(...items.filter(Boolean));
         if (typeof menu.openAt === "function") menu.openAt(point);
     }
@@ -2544,19 +2574,12 @@ class SacDataGrid extends HTMLElement {
         foot.append(clear, done);
         pop.appendChild(foot);
 
-        const h = this._hcells[c];
-        const r = (h || this._scroller).getBoundingClientRect();
+        pop.tabIndex = -1;                  // a click on its body keeps focus inside
         pop.style.left = "0px";
         pop.style.top = "0px";
         try { pop.showPopover(); } catch (err) { return; }
-        const pw = pop.offsetWidth, ph = pop.offsetHeight;
-        const vv = window.visualViewport;
-        const vwid = vv ? vv.width : innerWidth, vhei = vv ? vv.height : innerHeight;
-        const left = clamp(r.left, 8, Math.max(8, vwid - pw - 8));
-        let top = r.bottom + 4;
-        if (top + ph > vhei - 8 && r.top - ph - 4 > 8) top = r.top - ph - 4;
-        pop.style.left = left + "px";
-        pop.style.top = Math.max(8, top) + "px";
+        this._popField = f;
+        this._placePop();
 
         this._popOpen = true;
         this._popOutside = (e) => {
@@ -2570,12 +2593,41 @@ class SacDataGrid extends HTMLElement {
                 this._closeFilter(true);
             }
         };
+        // Tab (or anything) taking focus elsewhere closes it; a field's own
+        // popover (a calendar) still counts as inside.
+        this._popBlur = () => setTimeout(() => {
+            if (!this._popOpen) return;
+            const a = this.shadowRoot.activeElement;
+            if (!a || !pop.contains(a)) this._closeFilter(false);
+        }, 0);
+        // It stays under its header while the page or the grid scrolls.
+        this._popPlace = () => this._placePop();
         setTimeout(() => {
             if (!this._popOpen) return;
             document.addEventListener("pointerdown", this._popOutside, true);
         }, 0);
         pop.addEventListener("keydown", this._popKey);
+        pop.addEventListener("focusout", this._popBlur);
+        window.addEventListener("scroll", this._popPlace, true);
+        window.addEventListener("resize", this._popPlace);
+        this._scroller.addEventListener("scroll", this._popPlace);
         if (focusEl) requestAnimationFrame(() => focusEl.focus());
+    }
+
+    /** Anchor the filter popover under its column's header, inside the viewport. */
+    _placePop() {
+        const pop = this._pop;
+        const c = this._cols.findIndex((x) => x.field === this._popField);
+        const h = c >= 0 ? this._hcells[c] : null;
+        const r = (h || this._scroller).getBoundingClientRect();
+        const pw = pop.offsetWidth, ph = pop.offsetHeight;
+        const vv = window.visualViewport;
+        const vwid = vv ? vv.width : innerWidth, vhei = vv ? vv.height : innerHeight;
+        const left = clamp(r.left, 8, Math.max(8, vwid - pw - 8));
+        let top = r.bottom + 4;
+        if (top + ph > vhei - 8 && r.top - ph - 4 > 8) top = r.top - ph - 4;
+        pop.style.left = left + "px";
+        pop.style.top = Math.max(8, top) + "px";
     }
 
     _closeFilter(refocus) {
@@ -2583,6 +2635,10 @@ class SacDataGrid extends HTMLElement {
         this._popOpen = false;
         document.removeEventListener("pointerdown", this._popOutside, true);
         this._pop.removeEventListener("keydown", this._popKey);
+        this._pop.removeEventListener("focusout", this._popBlur);
+        window.removeEventListener("scroll", this._popPlace, true);
+        window.removeEventListener("resize", this._popPlace);
+        this._scroller.removeEventListener("scroll", this._popPlace);
         try { this._pop.hidePopover(); } catch (err) { /* already closed */ }
         if (refocus) this._scroller.focus({ preventScroll: true });
     }
@@ -2694,6 +2750,29 @@ class SacDataGrid extends HTMLElement {
         for (const v of vals) if (fn === "min" ? v < best : v > best) best = v;
         return best;
     }
+
+    /* The browser reads lifecycle callbacks once, at define(): the other grid
+     * scripts (loaded after this one) join connect / disconnect here. A
+     * connect hook also runs at once for the grids already on the page —
+     * they were upgraded when this script defined the element. */
+    const HOOKS = { connect: [], disconnect: [] };
+    const LIVE = new Set();
+    function runHooks(grid, name) {
+        if (name === "connect") LIVE.add(grid);
+        else LIVE.delete(grid);
+        for (const fn of HOOKS[name]) {
+            try { fn.call(grid); } catch (err) { console.error(`[sac-data-grid] ${name} hook:`, err); }
+        }
+    }
+    SacDataGrid.hook = (name, fn) => {
+        if (!HOOKS[name] || typeof fn !== "function") return;
+        HOOKS[name].push(fn);
+        if (name === "connect") {
+            for (const grid of LIVE) {
+                try { fn.call(grid); } catch (err) { console.error("[sac-data-grid] connect hook:", err); }
+            }
+        }
+    };
 
     SacDataGrid.tsvField = tsvField;
     SacDataGrid.parseTSV = parseTSV;

@@ -247,10 +247,19 @@
 
     /* ----------------------------------------------------------- editors -- */
 
+    const warned = new Set();
+
     /** A kit field for a cell, or null when its script is not loaded (the
-     *  grid then falls back to a plain .cell-input). */
+     *  grid then falls back to a plain .cell-input, and says so once). */
     function kitField(tag, col, attrs) {
-        if (!customElements.get(tag)) return null;
+        if (!customElements.get(tag)) {
+            if (!warned.has(tag)) {
+                warned.add(tag);
+                console.warn(`[sac-data-grid] <${tag}> is not loaded: ${col.typeName} cells fall back to a text input. `
+                    + "Load kit/js/components/" + tag + ".js (SACRVM APPKIT ≥ 2.21.0).");
+            }
+            return null;
+        }
         const el = document.createElement(tag);
         el.setAttribute("size", "cell");
         for (const [k, v] of Object.entries(attrs || {})) {
