@@ -859,7 +859,7 @@ class SacDataGrid extends HTMLElement {
         this._pop = $(".pop");
         // The menu lives in the document while open: sac-menu steps its
         // arrow-key focus by document.activeElement, which inside this shadow
-        // root would always be the grid itself.
+        // root would always be the grid itself (SACRVM/sacrvm-appkit#32).
         this._menu = document.createElement("sac-menu");
         this._menu.style.position = "fixed";
         this._menu.addEventListener("sac:select", (e) => {

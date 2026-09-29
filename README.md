@@ -248,7 +248,8 @@ load and save errors.
 
 Known kit limitations, reported upstream:
 [sac-dialog focus trap and Escape](https://github.com/SACRVM/sacrvm-appkit/issues/29) (the form
-works around the focus trap), [date / time helpers in `sac.regional`](https://github.com/SACRVM/sacrvm-appkit/issues/30)
+works around the focus trap), [sac-menu arrow keys inside a shadow root](https://github.com/SACRVM/sacrvm-appkit/issues/32)
+(the grid opens its menus in the document), [date / time helpers in `sac.regional`](https://github.com/SACRVM/sacrvm-appkit/issues/30)
 (the grid carries its own copy for now), and [labels for `sac-chip-input`](https://github.com/SACRVM/sacrvm-appkit/issues/31)
 (the tag editor shows the stored names).
 
