@@ -237,6 +237,23 @@
      *                  number needs), group (default true). Not finite → "".
      *   parseNumber(text)  text → number, NaN for empty text or garbage.
      *                  Tolerant: either separator is understood (see below).
+     *   formatDate(iso, opts)  "2026-09-25" → "25.09.2026" under "dmy.". ""
+     *                  for empty or not a real date. opts.format overrides the
+     *                  page format (a field's own `format` attribute).
+     *   parseDate(text, opts)  typed text → "yyyy-mm-dd", "" for empty text,
+     *                  null for garbage or an impossible date (2026-02-31).
+     *                  Tolerant like <sac-date-field>: an ISO date always
+     *                  works; otherwise day / month / year in the format's
+     *                  order, any of . / - between, single digits, a two-digit
+     *                  year (00–68 → 20xx, 69–99 → 19xx). opts.format.
+     *   formatTime(hhmm, opts)  "14:30" → "14:30" under h23, "2:30 PM" under
+     *                  h12 (AM / PM translated). "" for empty or garbage.
+     *                  opts.hourCycle overrides the page hour cycle.
+     *   parseTime(text)  typed or pasted text → "HH:MM" (24-hour), "" for
+     *                  empty, null for garbage. Reads both cycles whatever
+     *                  the setting: "9:5", "14.30", "14:30:00" (seconds
+     *                  dropped), "2:30 pm", "2 PM", "12 AM" → "00:00", and
+     *                  the translated AM / PM.
      *
      * Event: sac:regional on document, detail { date, hourCycle, number }.
      */
@@ -316,6 +333,94 @@
         return text.replace(/[.,]/g, (c) => (c === "." ? sep.decimal : sep.group));
     }
 
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const tr = (key, fallback) => (window.sac && window.sac.t) ? window.sac.t(key, fallback) : fallback;
+
+    /** y / m / d → padded ISO if it is a REAL local calendar date, else
+     *  null. Local Date math only — the ISO-string Date constructor parses
+     *  as UTC and shifts days. */
+    function isoDate(y, mo, d) {
+        const dt = new Date(y, mo - 1, d);
+        dt.setFullYear(y);                                  // years 0–99 are not 19xx
+        if (y < 1 || dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+        return `${String(y).padStart(4, "0")}-${pad2(mo)}-${pad2(d)}`;
+    }
+
+    function parseDate(text, fmt) {
+        if (text == null) return null;
+        const s = String(text).trim();
+        if (s === "") return "";
+        let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+        if (m) return isoDate(+m[1], +m[2], +m[3]);
+        if (fmt === "iso") return null;
+        m = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})$/.exec(s);
+        if (!m) return null;
+        let y = +m[3];
+        if (m[3].length === 2) y += y <= 68 ? 2000 : 1900;
+        const [d, mo] = fmt === "mdy/" ? [+m[2], +m[1]] : [+m[1], +m[2]];
+        return isoDate(y, mo, d);
+    }
+
+    function formatDate(iso, fmt) {
+        const norm = parseDate(iso, "iso");
+        if (!norm) return "";
+        const [y, m, d] = norm.split("-");
+        switch (fmt) {
+            case "dmy.": return `${d}.${m}.${y}`;
+            case "dmy/": return `${d}/${m}/${y}`;
+            case "mdy/": return `${m}/${d}/${y}`;
+            default:     return norm;
+        }
+    }
+
+    /** A trailing AM / PM marker (English or the current translation) →
+     *  { period: "am" | "pm" | "", rest }. */
+    function splitPeriod(s) {
+        const low = s.toLowerCase();
+        const marks = [];
+        for (const [p, words] of [["am", [tr("time-field.am", "AM"), "am", "a.m.", "a"]],
+                                  ["pm", [tr("time-field.pm", "PM"), "pm", "p.m.", "p"]]]) {
+            for (const w of words) if (w) marks.push([p, String(w).toLowerCase()]);
+        }
+        marks.sort((a, b) => b[1].length - a[1].length);    // "a.m." before "a"
+        for (const [p, w] of marks) {
+            if (low.endsWith(w) && /[\d\s]$/.test(low.slice(0, -w.length))) {
+                return { period: p, rest: s.slice(0, -w.length).trim() };
+            }
+        }
+        return { period: "", rest: s };
+    }
+
+    function parseTime(text) {
+        if (text == null) return null;
+        const t = String(text).trim();
+        if (t === "") return "";
+        const { period, rest } = splitPeriod(t);
+        const m = /^(\d{1,2})(?:\s*[:.]\s*(\d{1,2})(?:\s*[:.]\s*\d{1,2}(?:[.,]\d+)?)?)?$/.exec(rest);
+        if (!m || (m[2] === undefined && !period)) return null;   // a bare "14" is not a time
+        let h = +m[1];
+        const mi = m[2] === undefined ? 0 : +m[2];
+        if (mi > 59) return null;
+        if (period) {
+            if (h < 1 || h > 12) return null;
+            h = (h % 12) + (period === "pm" ? 12 : 0);
+        } else if (h > 23) return null;
+        return `${pad2(h)}:${pad2(mi)}`;
+    }
+
+    function formatTime(hhmm, cycle) {
+        const m = /^\s*(\d{1,2})\s*:\s*(\d{1,2})\s*$/.exec(String(hhmm == null ? "" : hhmm));
+        if (!m || +m[1] > 23 || +m[2] > 59) return "";
+        const h = +m[1], mi = pad2(+m[2]);
+        if (cycle !== "h12") return `${pad2(h)}:${mi}`;
+        const label = h < 12 ? tr("time-field.am", "AM") : tr("time-field.pm", "PM");
+        return `${h % 12 || 12}:${mi} ${label}`;
+    }
+
+    /** opts[key] if it is a known value, else the page-wide one. */
+    const pick = (opts, key, known, fallback) =>
+        (opts && known.includes(opts[key])) ? opts[key] : fallback;
+
     window.sac.regional = {
         get() { return { date: regional.date, hourCycle: regional.hourCycle, number: regional.number }; },
         set(partial) {
@@ -345,5 +450,9 @@
         },
         formatNumber(n, opts) { return formatNumber(n, opts, regional.number); },
         parseNumber(text) { return parseNumber(text, regional.number); },
+        formatDate(iso, opts) { return formatDate(iso, pick(opts, "format", DATE_FORMATS, regional.date)); },
+        parseDate(text, opts) { return parseDate(text, pick(opts, "format", DATE_FORMATS, regional.date)); },
+        formatTime(hhmm, opts) { return formatTime(hhmm, pick(opts, "hourCycle", HOUR_CYCLES, regional.hourCycle)); },
+        parseTime(text) { return parseTime(text); },
     };
 })();

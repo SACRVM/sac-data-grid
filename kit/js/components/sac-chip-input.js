@@ -30,8 +30,14 @@
  *
  * Properties:
  *   value        — string[]; current normalised names. Reading returns a copy.
- *   suggestions  — array of { name, color, count? }; color is a palette slot
- *                  name ("blue", "orange", … — see --palette-* tokens).
+ *   suggestions  — array of { name, color, count?, label?, labelKey? }; color
+ *                  is a palette slot name ("blue", "orange", … — see
+ *                  --palette-* tokens). label is the text SHOWN for the name
+ *                  (chips and list): capitals, spaces, umlauts, e.g.
+ *                  { name: "fragile", label: "Fragile" }. labelKey makes
+ *                  label the English fallback of sac.t(labelKey), so the
+ *                  text follows a runtime language switch. Typing matches
+ *                  label and name alike; value stays the list of names.
  *   focus({ select }) — reveals and focuses the text entry.
  *
  * Events:
@@ -92,6 +98,7 @@ class SacChipInput extends HTMLElement {
         this._value = [];
         this._suggestions = [];
         this._colors = new Map();    // name → slot (from suggestions + created)
+        this._labels = new Map();    // name → suggestion with a label / labelKey
         this._open = false;
         this._highlight = 0;
         this._creating = null;       // pending name awaiting color choice
@@ -135,8 +142,10 @@ class SacChipInput extends HTMLElement {
     get suggestions() { return [...this._suggestions]; }
     set suggestions(list) {
         this._suggestions = Array.isArray(list) ? list.filter(s => s && s.name) : [];
+        this._labels.clear();
         for (const s of this._suggestions) {
             if (s.color) this._colors.set(s.name, s.color);
+            if (s.label || s.labelKey) this._labels.set(s.name, s);
         }
         if (this._open) this._renderDropdown();
         this._renderChips(); // colors may have changed
@@ -144,6 +153,15 @@ class SacChipInput extends HTMLElement {
 
     _colorFor(name) {
         return this._colors.get(name) || "gray";
+    }
+
+    /** The text shown for a name: its suggestion's labelKey through sac.t
+     *  (label = the fallback), its label, else the name itself. */
+    _labelFor(name) {
+        const s = this._labels.get(name);
+        if (!s) return name;
+        const fallback = s.label ? String(s.label) : name;
+        return s.labelKey ? t(s.labelKey, fallback) : fallback;
     }
 
     _normalize(raw) {
@@ -163,6 +181,7 @@ class SacChipInput extends HTMLElement {
     _relabel() {
         if (!this._addText) return;
         this._addText.textContent = this._addLabel();
+        if (this._labels.size) this._renderChips();          // labelKey'd names
         if (this._open) {
             const top = this._dropdown.scrollTop;
             this._renderDropdown();
@@ -456,10 +475,10 @@ class SacChipInput extends HTMLElement {
         }
         for (const name of this._value) {
             const chip = document.createElement("sac-chip");
-            chip.setAttribute("label", name);
+            chip.setAttribute("label", this._labelFor(name));
             chip.setAttribute("color", this._colorFor(name));
             chip.setAttribute("removable", "");
-            chip.addEventListener("sac:remove", (e) => this._removeChip(e.detail.label));
+            chip.addEventListener("sac:remove", () => this._removeChip(name));
             this._chipsRoot.insertBefore(chip, this._addBtn);
         }
     }
@@ -539,13 +558,16 @@ class SacChipInput extends HTMLElement {
             return;
         }
 
+        // Match the name and the shown label alike ("zer" finds a "fragile"
+        // labelled "Zerbrechlich").
         const q = this._entry.value.trim().toLowerCase();
-        const matches = this._suggestions.filter(t =>
-            !this._value.includes(t.name) &&
-            (q === "" || t.name.includes(q))
+        const shown = (s) => this._labelFor(s.name).toLowerCase();
+        const matches = this._suggestions.filter(s =>
+            !this._value.includes(s.name) &&
+            (q === "" || s.name.includes(q) || shown(s).includes(q))
         );
 
-        const exact = q && matches.find(t => t.name === q);
+        const exact = q && matches.find(s => s.name === q || shown(s) === q);
         const canCreate = this.hasAttribute("allow-create");
         const showCreate = canCreate && q && !exact && this._normalize(q);
 
@@ -582,7 +604,7 @@ class SacChipInput extends HTMLElement {
             const count = o.entry.count > 0 ? `<span class="count">${esc(String(o.entry.count))}</span>` : "";
             return `<div class="opt ${i === this._highlight ? "hl" : ""}" data-idx="${i}">
                         <span class="swatch" style="background:${color}"></span>
-                        <span>${esc(o.entry.name)}</span>${count}
+                        <span>${esc(this._labelFor(o.entry.name))}</span>${count}
                     </div>`;
         }).join("");
 

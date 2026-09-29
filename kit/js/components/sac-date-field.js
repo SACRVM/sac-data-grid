@@ -34,7 +34,9 @@
  *                 sac:change stay ISO whatever the format. Typing is
  *                 tolerant: single-digit day/month, a two-digit year
  *                 (00–68 → 20xx, 69–99 → 19xx), any of . / - as separator,
- *                 and an ISO date is always accepted.
+ *                 and an ISO date is always accepted — the rules of
+ *                 sac.regional.parseDate / formatDate, which show and read
+ *                 dates the same way outside a field.
  *   label       — text above the row, kit form-label styling. Absent/empty =
  *                 no label line at all. Also becomes the input's accessible name.
  *   placeholder — the input's placeholder. Default follows the format
@@ -218,31 +220,19 @@ class SacDateField extends HTMLElement {
         return SacDateField.FORMATS.includes(reg) ? reg : "iso";
     }
 
-    /** Typed text → normalized ISO, "" or null. ISO always works; otherwise
-     *  day / month / year in the format's order, any of . / - between. */
+    /** Typed text → normalized ISO, "" or null. The rules are
+     *  sac.regional.parseDate's (one source for every date the kit reads);
+     *  without globals.js only ISO is understood. */
     _parseTyped(str) {
-        const iso = SacDateField._normalize(str);
-        const fmt = this._fmt();
-        if (iso !== null || fmt === "iso") return iso;
-        const m = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})$/.exec(String(str).trim());
-        if (!m) return null;
-        const [a, b] = [+m[1], +m[2]];
-        let y = +m[3];
-        if (m[3].length === 2) y += y <= 68 ? 2000 : 1900;
-        const [d, mo] = fmt === "mdy/" ? [b, a] : [a, b];
-        return SacDateField._normalize(`${y}-${mo}-${d}`);
+        const reg = window.sac && sac.regional && sac.regional.parseDate;
+        return reg ? sac.regional.parseDate(str, { format: this._fmt() }) : SacDateField._normalize(str);
     }
 
-    /** ISO → the text shown in the input. */
+    /** ISO → the text shown in the input (sac.regional.formatDate). */
     _display(iso) {
         if (!iso) return "";
-        const [y, m, d] = iso.split("-");
-        switch (this._fmt()) {
-            case "dmy.": return `${d}.${m}.${y}`;
-            case "dmy/": return `${d}/${m}/${y}`;
-            case "mdy/": return `${m}/${d}/${y}`;
-            default:     return iso;
-        }
+        const reg = window.sac && sac.regional && sac.regional.formatDate;
+        return reg ? sac.regional.formatDate(iso, { format: this._fmt() }) : iso;
     }
 
     /** Format changed: re-show value and placeholder; half-typed text stays. */
