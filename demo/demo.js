@@ -16,6 +16,9 @@
         "demo.mode-read": "Lesen",
         "demo.mode-sheet": "Tabelle",
         "demo.mode-form": "Formular",
+        "demo.save-cell": "Speichern je Zelle",
+        "demo.save-row": "je Zeile",
+        "demo.save-batch": "gesammelt",
         "demo.paging-scroll": "Scrollen",
         "demo.paging-pages": "Seiten",
         "demo.lines-quiet": "Ruhig",
@@ -102,10 +105,26 @@
         return rows;
     }
 
+    /** Status sorts by what it shows ("Abgeschlossen" before "Neu" in German),
+     *  not by its stored value. */
+    const byStatusLabel = (() => {
+        let lang = null, rank = null;
+        return (a, b) => {
+            if (lang !== sac.lang.get()) {
+                lang = sac.lang.get();
+                const coll = new Intl.Collator(sac.lang.locale());
+                const labels = STATUS.map(([v, en]) => [v, t(`demo.status.${v}`, en)]).sort((x, y) => coll.compare(x[1], y[1]));
+                rank = new Map(labels.map(([v], i) => [v, i]));
+            }
+            return (rank.get(a) ?? 99) - (rank.get(b) ?? 99);
+        };
+    })();
+    const compare = { status: byStatusLabel };
+
     /** A paged "server": latency, no total (incremental loading), optional
      *  failures — backed by an array source. */
     function serverSource(rows) {
-        const inner = SacDataGrid.arraySource(rows, { key: "id" });
+        const inner = SacDataGrid.arraySource(rows, { key: "id", compare });
         const failEvery = parseInt(params.get("fail"), 10) || 0;
         let calls = 0;
         const wait = (ms, signal) => new Promise((resolve, reject) => {
@@ -170,7 +189,7 @@
     const grid = document.getElementById("grid");
     const size = Math.max(1, Math.min(1000000, parseInt(params.get("rows"), 10) || 100000));
     const sources = {
-        array: SacDataGrid.arraySource(makeRows(size, 42), { key: "id" }),
+        array: SacDataGrid.arraySource(makeRows(size, 42), { key: "id", compare }),
         server: serverSource(makeRows(5000, 7)),
     };
 
@@ -187,6 +206,7 @@
     const on = (id, fn) => document.getElementById(id).addEventListener("sac:change", (e) => fn(e.detail.value));
     on("source", (v) => { grid.source = sources[v]; });
     on("mode", (v) => { grid.mode = v; });
+    on("save-mode", (v) => grid.setAttribute("save-mode", v));
     on("paging", (v) => grid.setAttribute("paging", v));
     on("lines", (v) => grid.setAttribute("lines", v));
 

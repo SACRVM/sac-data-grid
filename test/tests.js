@@ -899,12 +899,14 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.frames(4);
         eq(await p.eval("document.querySelector('sac-dialog[open]').getAttribute('title')"), "Discard your changes?", "asks");
         await p.eval("document.querySelector('sac-dialog[open]').trigger('keep')");
-        await p.frames(4);
+        await p.eval("new Promise(r => setTimeout(r, 250))");   // sac.dialog answers after its fade-out
+        await p.frames(2);
         eq(await p.eval("fx.grid._formState && fx.grid._formState.fields[1].focus.value"), "Changed", "reopened with the typed text");
         await p.key("Escape");
         await p.frames(4);
         await p.eval("document.querySelector('sac-dialog[open]').trigger('discard')");
-        await p.frames(4);
+        await p.eval("new Promise(r => setTimeout(r, 250))");
+        await p.frames(2);
         eq([await dialogOpen(p), await p.eval("fx.data[1].name")], [false, "Ben 2"], "discard drops them");
         await p.key("Enter");
         await p.frames(3);

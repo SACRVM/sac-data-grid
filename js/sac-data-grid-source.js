@@ -23,6 +23,9 @@
  *             here, and whole-column stats and totals then need few loads)
  *   newId(row)  id for a created row that has none (default: max numeric
  *             id + 1, else a "new-<n>" string)
+ *   compare   { field: (a, b) => number } — a field's own order for non-empty
+ *             values, e.g. a select column by its shown label instead of its
+ *             stored value. Re-sorted after a language switch.
  */
 (function () {
     const Grid = window.SacDataGrid;
@@ -89,14 +92,20 @@
         }
 
         function query(sort, filter) {
-            const sig = JSON.stringify([sort || [], filter || {}]);
+            // The language is part of the query: text order (and labels) follow it.
+            const sig = JSON.stringify([sort || [], filter || {}, (window.sac && sac.lang) ? sac.lang.get() : ""]);
             if (memo && memo.sig === sig && memo.version === version) return memo.view;
             let view = data;
             const fields = filter ? Object.keys(filter) : [];
             if (fields.length) view = data.filter((row) => fields.every((f) => matches(row[f], filter[f])));
             if (sort && sort.length) {
                 const coll = collator();
-                const keys = sort.map((s) => ({ field: s.field, dir: s.dir === "desc" ? -1 : 1 }));
+                const own = o.compare || {};
+                const keys = sort.map((s) => ({
+                    field: s.field,
+                    dir: s.dir === "desc" ? -1 : 1,
+                    cmp: typeof own[s.field] === "function" ? own[s.field] : null,
+                }));
                 view = view.map((row, i) => ({ row, i }));
                 view.sort((x, y) => {
                     for (const k of keys) {
@@ -106,7 +115,7 @@
                             if (ea && eb) continue;
                             return ea ? 1 : -1;      // empty last, whatever the direction
                         }
-                        const c = compare(a, b, coll);
+                        const c = k.cmp ? k.cmp(a, b) : compare(a, b, coll);
                         if (c) return c * k.dir;
                     }
                     return x.i - y.i;

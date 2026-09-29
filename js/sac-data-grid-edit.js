@@ -660,7 +660,8 @@
     P._onSpace = function () { return this._toggleBool(); };
 
     P._onCellPointerDown = function (e, r, c) {
-        const box = e.target.closest && e.target.closest(".bool");
+        // The box itself; on touch, anywhere in the cell (the box is no 44px target).
+        const box = (e.target.closest && e.target.closest(".bool")) || e.pointerType === "touch";
         if (!box || e.shiftKey || e.button !== 0) return false;
         if (this._cols[c].typeName !== "bool" || !this._canEdit(r, c) || !this._rowAt(r)) return false;
         this._setCursor(r, c, false);
