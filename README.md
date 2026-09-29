@@ -15,7 +15,7 @@ The binding specification is [`SPEC.md`](SPEC.md).
   Undo toast; footer totals and selection stats.
 - Light / dark / per-app accent through tokens, EN / DE, live `sac.regional` formats, ARIA grid.
 
-Zero build: plain classic scripts, the kit vendored in `kit/` (needs **kit ≥ 2.21.0**).
+Zero build: plain classic scripts, the kit vendored in `kit/` (needs **kit ≥ 2.22.0**).
 
 ## Quick start
 
@@ -99,7 +99,7 @@ The grid fills the height you give it (default 420px).
 | `hidden` | Starts hidden (the header menu shows it again). |
 | `editable: false` | Read-only column. `inline: false`: editable only in the record form. |
 | `required`, `validate(value, row)` | Validation: `validate` returns a message or `null`. Invalid cells are marked and their row is not saved. |
-| `options` | `select` / `tags`: `[{ value, label?, labelKey?, color? }]` or plain strings. `color` is a kit palette slot (`blue`, `orange`, …). |
+| `options` | `select` / `tags`: `[{ value, label?, labelKey?, color? }]` or plain strings. `color` is a kit palette slot (`blue`, `orange`, …). A `tags` value is a kit tag name (lower-case `a–z`, `0–9`, `_ : -`); `label` is what its chip shows. |
 | `decimals`, `min`, `max`, `step` | `number` (and `min` / `max` / `step` for `date` / `time`). |
 | `allowCreate: false` | `tags`: only the listed options. |
 | `format(value, row)` | The shown text (a computed column: `type: "readonly"` + `format`). |
@@ -117,7 +117,7 @@ The grid fills the height you give it (default 420px).
 | `datetime` | `"yyyy-mm-ddTHH:MM"` | both | date + time fields side by side |
 | `bool` | true / false | a check box | toggles in place (Space, click) |
 | `select` | an option value | its label | `<sac-select>` |
-| `tags` | string[] | chips | `<sac-chip-input>` |
+| `tags` | string[] | chips with the labels | `<sac-chip-input>` |
 | `color` | `"#rrggbb"` | swatch + hex | `<sac-color-field>` |
 | `readonly` | anything | `format(value, row)` | none |
 
@@ -209,6 +209,11 @@ Pasting one value fills the range. A block tiles a range that is a multiple of i
 cursor and extends from there; past the last row it adds rows. Cells that fail parsing or
 validation are marked and left unchanged. The whole paste is one undo step.
 
+Copy writes the cells as text: the labels of `select` and `tags`, a long text in full, numbers
+without grouping, `TRUE` / `FALSE`. Paste reads text back by the kit's `sac.regional` rules, the
+same as the kit's fields: a date in the regional day / month order (ISO always works), a time in
+either hour cycle, a number with either separator.
+
 ## Edit modes
 
 - **`read`**: selection, copy, sort and filter; no editing affordances. Enter opens the record read-only.
@@ -245,12 +250,5 @@ load and save errors.
 - `node test/run.js [filter]` runs the headless-Chrome tests over the DevTools protocol.
   No dependencies; `CHROME=/path/to/chrome` picks the browser.
 - `kit/` is the vendored kit release. Never edit it here; upgrade by replacing the folder.
-
-Known kit limitations, reported upstream:
-[sac-dialog focus trap and Escape](https://github.com/SACRVM/sacrvm-appkit/issues/29) (the form
-works around the focus trap), [sac-menu arrow keys inside a shadow root](https://github.com/SACRVM/sacrvm-appkit/issues/32)
-(the grid opens its menus in the document), [date / time helpers in `sac.regional`](https://github.com/SACRVM/sacrvm-appkit/issues/30)
-(the grid carries its own copy for now), and [labels for `sac-chip-input`](https://github.com/SACRVM/sacrvm-appkit/issues/31)
-(the tag editor shows the stored names).
 
 MIT License.

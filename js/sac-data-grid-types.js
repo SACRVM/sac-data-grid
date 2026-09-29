@@ -35,8 +35,9 @@
  *   parse(text, row)    → the value, for pasted text; throw or return
  *                         undefined to reject it
  *
- * Date and time display follow sac.regional (date order, hour cycle) and
- * update live; numbers use sac.regional.formatNumber / parseNumber.
+ * Dates, times and numbers are shown and read the kit's way (sac.regional:
+ * formatDate / parseDate, formatTime / parseTime, formatNumber / parseNumber;
+ * kit ≥ 2.22.0) and follow its settings live.
  */
 (function () {
     if (window.SacDataGridTypes) return;
@@ -49,7 +50,23 @@
     /** No value at all: the empty cell. */
     const isEmpty = (v) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
 
-    /* ------------------------------------------------------------ dates -- */
+    /* -------------------------------------------------- dates and times -- */
+
+    // Shown and typed text follow the kit (sac.regional, kit ≥ 2.22.0): the
+    // same rules as <sac-date-field> and <sac-time-field>. The norm* helpers
+    // only tidy a STORED value first (a Date, a datetime string, seconds).
+    // Without the kit helpers, dates and times stay ISO.
+    let regionalWarned = false;
+    function kitRegional(name) {
+        const r = window.sac && sac.regional;
+        if (r && typeof r[name] === "function") return r[name];
+        if (!regionalWarned) {
+            regionalWarned = true;
+            console.warn(`[sac-data-grid] sac.regional.${name} is missing: dates and times show as ISO. `
+                + "Load SACRVM APPKIT ≥ 2.22.0.");
+        }
+        return null;
+    }
 
     /** A real local calendar date as ISO, or null. */
     function ymd(y, m, d) {
@@ -67,42 +84,22 @@
         return m ? ymd(+m[1], +m[2], +m[3]) || "" : "";
     }
 
+    /** A stored date → its regional text; fmt ("dmy." …) overrides the page. */
     function formatDate(v, fmt) {
         const iso = normDate(v);
-        if (!iso) return "";
-        const [y, m, d] = iso.split("-");
-        switch (fmt || regional().date) {
-            case "dmy.": return `${d}.${m}.${y}`;
-            case "dmy/": return `${d}/${m}/${y}`;
-            case "mdy/": return `${m}/${d}/${y}`;
-            default:     return iso;
-        }
+        const kit = kitRegional("formatDate");
+        return iso && kit ? kit(iso, fmt ? { format: fmt } : undefined) : iso;
     }
 
-    /**
-     * Text → ISO date, "" for empty text, null for garbage. ISO is always
-     * understood; otherwise day / month order follows the regional format
-     * ("mdy/" = month first; "iso" reads "/" as month first, like a US
-     * spreadsheet, and "." or "-" as day first), and when that order gives no
-     * real date the other one is tried. Any of . / - separates; a two-digit
-     * year means 00–68 → 20xx, 69–99 → 19xx.
-     */
+    /** Typed or pasted text → ISO date, "" for empty text, null for garbage.
+     *  ISO always works; otherwise day and month come in the order of the
+     *  regional format, any of . / - between, two-digit years allowed. */
     function parseDate(text, fmt) {
         const s = String(text == null ? "" : text).trim();
-        if (s === "") return "";
-        let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
-        if (m) return ymd(+m[1], +m[2], +m[3]);
-        m = /^(\d{1,2})([./-])(\d{1,2})\2(\d{4}|\d{2})\.?$/.exec(s);
-        if (!m) return null;
-        const a = +m[1], b = +m[3];
-        let y = +m[4];
-        if (m[4].length === 2) y += y <= 68 ? 2000 : 1900;
-        const f = fmt || regional().date;
-        const monthFirst = f === "mdy/" || (f === "iso" && m[2] === "/");
-        return monthFirst ? (ymd(y, a, b) || ymd(y, b, a)) : (ymd(y, b, a) || ymd(y, a, b));
+        const kit = kitRegional("parseDate");
+        if (kit) return kit(s, fmt ? { format: fmt } : undefined);
+        return s === "" ? "" : (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s) && normDate(s)) || null;
     }
-
-    /* ------------------------------------------------------------ times -- */
 
     /** Any stored time value → "HH:MM", or "". */
     function normTime(v) {
@@ -111,36 +108,21 @@
         return `${pad(+m[1])}:${pad(+m[2])}`;
     }
 
+    /** A stored time → its text in the page hour cycle, or in cycle ("h12"). */
     function formatTime(v, cycle) {
         const s = normTime(v);
-        if (!s || (cycle || regional().hourCycle) !== "h12") return s;
-        const h = +s.slice(0, 2);
-        const period = h >= 12 ? t("time-field.pm", "PM") : t("time-field.am", "AM");
-        return `${h % 12 || 12}:${s.slice(3)} ${period}`;
+        const kit = kitRegional("formatTime");
+        return s && kit ? kit(s, cycle ? { hourCycle: cycle } : undefined) : s;
     }
 
-    /** Text → "HH:MM", "" for empty, null for garbage. "9", "9:05", "09.05",
-     *  "9h05", "21:05:30", "9:05 pm", "9 PM" all work. */
+    /** Text → "HH:MM", "" for empty, null for garbage. Both hour cycles are
+     *  read: "9:05", "14.30", "14:30:00", "2:30 pm", "2 PM". */
     function parseTime(text) {
         const s = String(text == null ? "" : text).trim();
-        if (s === "") return "";
-        const am = t("time-field.am", "AM"), pm = t("time-field.pm", "PM");
-        const m = /^(\d{1,2})(?:[:.h](\d{2}))?(?::\d{2}(?:[.,]\d+)?)?\s*(.*)$/i.exec(s);
-        if (!m) return null;
-        let h = +m[1];
-        const min = m[2] == null ? 0 : +m[2];
-        const tail = m[3].replace(/\./g, "").trim().toLowerCase();
-        if (tail) {
-            const isAm = tail === "a" || tail === "am" || tail === am.toLowerCase();
-            const isPm = tail === "p" || tail === "pm" || tail === pm.toLowerCase();
-            if ((!isAm && !isPm) || h < 1 || h > 12) return null;
-            h = (h % 12) + (isPm ? 12 : 0);
-        }
-        if (h > 23 || min > 59) return null;
-        return `${pad(h)}:${pad(min)}`;
+        const kit = kitRegional("parseTime");
+        if (kit) return kit(s);
+        return s === "" ? "" : (/^\d{1,2}:\d{2}$/.test(s) && normTime(s)) || null;
     }
-
-    /* -------------------------------------------------------- datetimes -- */
 
     /** Any stored datetime value → "yyyy-mm-ddTHH:MM", or "". A date alone
      *  means midnight. */
@@ -161,15 +143,21 @@
         return s ? `${formatDate(s.slice(0, 10))} ${formatTime(s.slice(11))}` : "";
     }
 
-    /** "25.09.2026 14:30", "9/25/2026 2:30 PM", "2026-09-25T14:30" … */
+    /** "25.09.2026 14:30", "9/25/2026 2:30 PM", "2026-09-25T14:30"; a date
+     *  alone means midnight. A date may hold spaces itself ("25. 9. 2026"),
+     *  so every split point is tried in turn. */
     function parseDateTime(text) {
         const s = String(text == null ? "" : text).trim();
         if (s === "") return "";
-        const cut = s.search(/[T\s]/);
-        const date = parseDate(cut < 0 ? s : s.slice(0, cut));
-        if (!date) return null;
-        const time = cut < 0 ? "00:00" : parseTime(s.slice(cut + 1));
-        return time ? `${date}T${time}` : null;
+        const date = parseDate(s);
+        if (date) return `${date}T00:00`;
+        const split = /T|\s+/g;
+        for (let m; (m = split.exec(s));) {
+            const d = parseDate(s.slice(0, m.index));
+            const tm = d && parseTime(s.slice(m.index + m[0].length));
+            if (tm) return `${d}T${tm}`;
+        }
+        return null;
     }
 
     /* ---------------------------------------------------------- numbers -- */
@@ -235,6 +223,18 @@
     const PALETTE = ["blue", "orange", "red", "green", "purple", "pink", "yellow", "teal", "gray", "indigo"];
     const slot = (color) => PALETTE.includes(color) ? color : "gray";
 
+    /** What <sac-chip-input> accepts as a tag name (it lower-cases input). */
+    const TAG_NAME = /^[a-z0-9_:-]{1,50}$/;
+
+    /** A tags column's options as <sac-chip-input> suggestions: the value is
+     *  the name, label / labelKey the shown text (it relabels live). */
+    const tagSuggestions = (col) => (col.options || []).map((o) => ({
+        name: String(o.value),
+        color: slot(o.color),
+        label: o.label != null ? String(o.label) : undefined,
+        labelKey: o.labelKey,
+    }));
+
     /* ------------------------------------------------------------ colors -- */
 
     function normColor(v) {
@@ -256,7 +256,7 @@
             if (!warned.has(tag)) {
                 warned.add(tag);
                 console.warn(`[sac-data-grid] <${tag}> is not loaded: ${col.typeName} cells fall back to a text input. `
-                    + "Load kit/js/components/" + tag + ".js (SACRVM APPKIT ≥ 2.21.0).");
+                    + "Load kit/js/components/" + tag + ".js (SACRVM APPKIT ≥ 2.22.0).");
             }
             return null;
         }
@@ -468,15 +468,23 @@
     define("tags", {
         width: 220,
         filter: "any",
-        text(v) { return Array.isArray(v) ? v.join(", ") : (isEmpty(v) ? "" : String(v)); },
+        text(v, col) {
+            const list = Array.isArray(v) ? v : (isEmpty(v) ? [] : [v]);
+            return list.map((name) => {
+                const o = findOption(col, name);
+                return o ? optionLabel(o) : String(name);
+            }).join(", ");
+        },
+        // Labels or names; a new name follows the kit's tag-name rule, so the
+        // chip editor can hold it.
         parse(text, col) {
             const list = [];
             for (const part of String(text).split(/[,;\n]/)) {
                 const s = part.trim();
                 if (!s) continue;
                 const o = matchOption(col, s);
-                const name = o ? String(o.value) : s;
-                if (!o && col.allowCreate === false) return undefined;
+                const name = o ? String(o.value) : s.toLowerCase();
+                if (!o && (col.allowCreate === false || !TAG_NAME.test(name))) return undefined;
                 if (!list.includes(name)) list.push(name);
             }
             return list;
@@ -495,7 +503,7 @@
         },
         editor(col) {
             const el = kitField("sac-chip-input", col, { "allow-create": col.allowCreate !== false });
-            if (el) el.suggestions = (col.options || []).map((o) => ({ name: String(o.value), color: slot(o.color) }));
+            if (el) el.suggestions = tagSuggestions(col);
             return el;
         },
         toEditor(v) { return Array.isArray(v) ? v.slice() : []; },
@@ -573,6 +581,7 @@
         normOptions,
         optionLabel,
         findOption,
+        tagSuggestions,
         normDate, formatDate, parseDate,
         normTime, formatTime, parseTime,
         normDateTime, formatDateTime, parseDateTime,

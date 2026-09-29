@@ -16,8 +16,8 @@
  * Escape or a click beside it with changes in the form asks before they are
  * thrown away; the explicit Cancel does not ask.
  *
- * The dialog lives in the document (not in the grid's shadow root): its
- * focus trap and the kit's form styles work on light-DOM content only.
+ * The dialog lives in the document (not in the grid's shadow root), where
+ * the kit's form styles (ui.css) reach it.
  *
  * Loaded after js/sac-data-grid-edit.js.
  */
@@ -69,7 +69,7 @@
         if (!customElements.get(tag)) {
             if (!warned.has(tag)) {
                 warned.add(tag);
-                console.warn(`[sac-data-grid] <${tag}> is not loaded: the form uses a text input (SACRVM APPKIT ≥ 2.21.0).`);
+                console.warn(`[sac-data-grid] <${tag}> is not loaded: the form uses a text input (SACRVM APPKIT ≥ 2.22.0).`);
             }
             return null;
         }
@@ -348,7 +348,7 @@
             wrap.append(field(el));
         } else if (name === "date" && (el = reg("sac-date-field", { min: col.min && T.normDate(col.min), max: col.max && T.normDate(col.max) }))) {
             wrap.append(field(el, T.normDate, (v) => v || ""));
-        } else if (name === "time" && (el = reg("sac-time-field", { step: col.step }))) {
+        } else if (name === "time" && (el = reg("sac-time-field", { step: col.step, min: col.min && T.normTime(col.min), max: col.max && T.normTime(col.max) }))) {
             wrap.append(field(el, T.normTime, (v) => v || ""));
         } else if (name === "datetime" && customElements.get("sac-date-field") && customElements.get("sac-time-field")) {
             const s = T.normDateTime(value);
@@ -379,7 +379,7 @@
             el.options = col.options.map((o) => ({ value: String(o.value), label: T.optionLabel(o) }));
             wrap.append(field(el, (v) => (v == null ? "" : String(v)), (v) => type.fromEditor(v, col)));
         } else if (name === "tags" && (el = kit("sac-chip-input", { "allow-create": col.allowCreate !== false, "aria-label": label }))) {
-            el.suggestions = col.options.map((o) => ({ name: String(o.value), color: o.color || "gray" }));
+            el.suggestions = T.tagSuggestions(col);
             if (ro) el.setAttribute("disabled", "");
             wrap.append(caption());
             wrap.append(field(el, (v) => (Array.isArray(v) ? v.slice() : []), (v) => (Array.isArray(v) ? v.slice() : [])));
@@ -390,16 +390,6 @@
             plain(false);
         }
         if (ro) { f.get = null; f.snap = null; f.restore = null; }
-        // sac-dialog's focus trap only cycles native focusables, so Tab would
-        // skip the kit fields (SACRVM/sacrvm-appkit#29). A tabindex puts them
-        // in its list; the trap focuses them through their own focus().
-        for (const k of wrap.querySelectorAll("*")) {
-            if (!k.localName.startsWith("sac-") || k.localName === "sac-icon" || k.hasAttribute("disabled")) continue;
-            k.tabIndex = 0;
-            k.addEventListener("focus", (e) => {
-                if (e.target === k && !(k.shadowRoot && k.shadowRoot.activeElement)) k.focus();
-            });
-        }
         const err = document.createElement("div");
         err.className = "sdg-err";
         err.id = id + "-err";

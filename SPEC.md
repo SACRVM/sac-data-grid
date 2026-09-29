@@ -17,8 +17,9 @@ GitHub issue in this repo) before treating the default as final.
   a few classic scripts under `js/` if one file gets unwieldy — no modules, no
   build). Shadow DOM, kit tokens only.
 - It **consumes the vendored SACRVM APPKIT** (`kit/`, the release ZIP dropped
-  in verbatim) and requires **kit ≥ 2.21.0** — the release that ships the cell
-  editors this grid needs (see §6). It never copies kit code.
+  in verbatim) and requires **kit ≥ 2.22.0** — 2.21.0 ships the cell editors
+  this grid needs, 2.22.0 the date / time helpers and the dialog, menu and
+  chip-input fixes it builds on (see §6). It never copies kit code.
 - Demo page `index.html`: a 100k-row array source, a paged "server" source
   (a fake async source with latency), every column type, frozen columns,
   footer totals, light/dark, EN/DE.
@@ -172,6 +173,16 @@ Custom types: `{ render(value, row), editor(cell) → HTMLElement, parse, format
   `sac.regional.formatNumber / parseNumber`, plus date/time formatting.
 - `sac.lang` / `sac.t`, `sac.hotkeys`, `sac.toast` (Undo action),
   `sac-menu` (header menus), `sac-spinner`.
+
+**Kit 2.22.0** (https://github.com/SACRVM/sacrvm-appkit/releases/tag/v2.22.0)
+adds what the grid builds on since:
+
+- `sac.regional.formatDate / parseDate / formatTime / parseTime`: the grid
+  shows and reads dates and times with them, like the kit's own fields.
+- `sac-dialog`: the focus trap reaches the inputs inside kit fields, and an
+  open popover (a select list, a calendar) takes Escape before the dialog.
+- `sac-menu`: arrow keys work inside another component's shadow root.
+- `sac-chip-input`: suggestions carry `label` / `labelKey` (the shown text).
 
 If a gap in the kit shows up: open an issue on SACRVM/sacrvm-appkit instead
 of working around it inside the grid.

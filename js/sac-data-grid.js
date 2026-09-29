@@ -8,7 +8,7 @@
  * tokens and fields, so it themes, translates and formats like the rest of
  * the app.
  *
- * Requires kit ≥ 2.21.0 (css/ui.css, lib/globals.js, and the components it
+ * Requires kit ≥ 2.22.0 (css/ui.css, lib/globals.js, and the components it
  * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog and the cell
  * editors) plus the grid's own scripts, in this order:
  *   js/sac-data-grid-types.js, js/sac-data-grid.js, js/sac-data-grid-edit.js
@@ -580,6 +580,7 @@
         }
 
         .pop:focus { outline: none; }
+        sac-menu { position: absolute; }    /* its panel opens in the top layer */
         /* An empty grid has no cursor cell to show that it has focus. */
         .scroller.empty:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
@@ -704,10 +705,7 @@ class SacDataGrid extends HTMLElement {
         document.removeEventListener("paste", this._onDocCopy);
         if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
         this._closeFilter();
-        if (this._menu && this._menu.isConnected) {
-            if (typeof this._menu.close === "function") this._menu.close();
-            this._menu.remove();
-        }
+        if (this._menu && typeof this._menu.close === "function") this._menu.close();
     }
 
     attributeChangedCallback(name, old, value) {
@@ -857,17 +855,12 @@ class SacDataGrid extends HTMLElement {
         this._pager = $(".pager");
         this._live = $(".live");
         this._pop = $(".pop");
-        // The menu lives in the document while open: sac-menu steps its
-        // arrow-key focus by document.activeElement, which inside this shadow
-        // root would always be the grid itself (SACRVM/sacrvm-appkit#32).
         this._menu = document.createElement("sac-menu");
-        this._menu.style.position = "fixed";
+        this.shadowRoot.appendChild(this._menu);
+        // sac-menu has closed and handed focus back when it reports the item.
         this._menu.addEventListener("sac:select", (e) => {
             e.stopPropagation();
             const fn = this._menuActions && this._menuActions[e.detail && e.detail.action];
-            // Focus comes home first (the menu leaves it on its hidden item);
-            // an action that opens something (a filter, a form) takes it on.
-            this._scroller.focus({ preventScroll: true });
             if (fn) fn();
         });
         // Keep the column's menu button shown while its menu is open.
@@ -2224,6 +2217,7 @@ class SacDataGrid extends HTMLElement {
     }
 
     _onBodyContextMenu(e) {
+        if (this._inEditor && this._inEditor(e)) return;          // the editor's text: the browser's menu
         const row = this._rowOf(e.target);
         if (!row) return;
         e.preventDefault();
@@ -2382,7 +2376,10 @@ class SacDataGrid extends HTMLElement {
 
     _openMenu(items, point) {
         const menu = this._menu;
-        if (!menu.isConnected) document.body.appendChild(menu);
+        if (this._editor) this._commitEdit(null);          // a header menu while editing
+        // The menu hands focus back to whatever had it: make that the grid
+        // (its one tab stop), not a header button that a click focused.
+        if (this.shadowRoot.activeElement !== this._scroller) this._scroller.focus({ preventScroll: true });
         menu.replaceChildren(...items.filter(Boolean));
         if (typeof menu.openAt === "function") menu.openAt(point);
     }

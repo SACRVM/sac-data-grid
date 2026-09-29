@@ -139,9 +139,14 @@
         rect(elm) { const r = elm.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; },
         center(elm) { const r = elm.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; },
         focusGrid() { grid._scroller.focus(); return root().activeElement === grid._scroller; },
-        activeTag() {
+        /** The focused element itself, down through shadow roots. */
+        deepActive() {
             let a = document.activeElement;
             while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+            return a;
+        },
+        activeTag() {
+            const a = fx.deepActive();
             return a ? a.tagName.toLowerCase() + (a.className ? "." + String(a.className).split(" ")[0] : "") : null;
         },
         /** Time a full re-render of the visible rows. */

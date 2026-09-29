@@ -12,7 +12,8 @@ core kit, the same way `sac-md-editor` is. **The full, binding specification is
 `kit/` is the vendored SACRVM APPKIT (the release ZIP from
 https://github.com/SACRVM/sacrvm-appkit/releases, dropped in verbatim with
 `kit/VERSION`). Never edit it here. To upgrade, delete the folder and unzip the
-next release. The grid needs **kit ≥ 2.21.0** (the cell editors, see SPEC §6).
+next release. The grid needs **kit ≥ 2.22.0** (the cell editors, the date / time
+helpers and the dialog / menu fixes, see SPEC §6).
 
 ## Ecosystem rules (hard)
 

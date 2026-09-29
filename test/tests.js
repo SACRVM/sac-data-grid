@@ -627,7 +627,7 @@ module.exports = function ({ test, eq, ok, center }) {
         ok(await p.eval("fx.pasteText('same')"), "paste handled");
         await settle(p);
         eq(await p.eval("[fx.cell(0, 11), fx.cell(0, 12), fx.cell(1, 11), fx.cell(1, 12)]"), ["same", "same", "same", "same"], "one value fills the range");
-        await p.eval("sac.regional.set({ number: '1.234,5' })");
+        await p.eval("sac.regional.set({ number: '1.234,5', date: 'dmy.' })");
         await p.eval("fx.grid.focusCell(1, 'n')");
         await p.eval(`fx.pasteText("1.234,5\\t2026-03-04\\r\\nabc\\t04.05.2026\\r\\n")`);
         await settle(p);
@@ -635,7 +635,7 @@ module.exports = function ({ test, eq, ok, center }) {
             [[1234.5, "2026-03-04"], [3.7, "2026-05-04"]], "parsed per type; the bad number not applied");
         ok(await p.eval("fx.cellEl(1, 2).classList.contains('invalid')"), "bad cell marked");
         ok((await p.eval("fx.cellEl(1, 2).title")).includes("abc"), "with the rejected text");
-        await p.eval("sac.regional.set({ number: '1,234.5' })");
+        await p.eval("sac.regional.set({ number: '1,234.5', date: 'iso' })");
         await p.eval("fx.grid.focusCell(6, 'name')");
         await p.eval(`fx.pasteText("x1\\ny1\\nz1")`);
         await settle(p);
@@ -787,14 +787,25 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
         await p.key("Enter");
         await p.frames(3);
+        // The dialog's trap steps through the kit fields' own inputs (a date
+        // field is its text and its calendar button): one entry per field.
         const hosts = [];
-        for (let i = 0; i < 10; i++) {
+        let inside = true;
+        for (let i = 0; i < 40 && hosts[hosts.length - 1] !== "textarea"; i++) {
             await p.key("Tab");
-            hosts.push(await p.eval("document.activeElement.localName"));
+            const [host, inner] = await p.eval(`(() => {
+                const a = document.activeElement, d = fx.deepActive();
+                return [a.localName, !a.localName.startsWith("sac-") || d !== a];
+            })()`);
+            inside = inside && inner;
+            if (hosts[hosts.length - 1] !== host) hosts.push(host);
         }
-        await p.key("Escape");
         eq(hosts, ["sac-number-field", "sac-date-field", "sac-time-field", "sac-date-field", "sac-time-field",
             "input", "sac-select", "sac-chip-input", "sac-color-field", "textarea"]);
+        ok(inside, "focus lands on the inputs inside the kit fields");
+        await p.key("Tab", ["Shift"]);
+        eq(await p.eval("document.activeElement.localName"), "sac-color-field", "Shift+Tab goes back");
+        await p.key("Escape");
     });
     test("source.create saves new rows and hands back the real id", async (p) => {
         await p.load("/test/fixture.html?rows=3&create=1");
@@ -865,7 +876,7 @@ module.exports = function ({ test, eq, ok, center }) {
         ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "Alt+↓ opens the column menu");
         await p.key("ArrowDown");
         await p.key("ArrowDown");
-        eq(await p.eval("document.activeElement.dataset.action"), "sort-desc", "arrows move through the items");
+        eq(await p.eval("fx.deepActive().dataset.action"), "sort-desc", "arrows move through the items");
         await p.key("Enter");
         await settle(p);
         eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "desc" }]);
@@ -941,7 +952,17 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.frames(3);
         await p.eval("fx.grid.remove()");
         await p.frames(2);
-        eq(await p.eval("[!!document.querySelector('sac-dialog'), !!document.querySelector('sac-menu')]"), [false, false]);
+        eq(await p.eval("!!document.querySelector('sac-dialog')"), false, "the form is gone");
+        await p.eval("document.body.appendChild(fx.grid)");
+        await settle(p);
+        await p.eval("fx.focusGrid()");
+        await p.key("ArrowDown", ["Alt"]);
+        await p.frames(2);
+        ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "menu open");
+        await p.eval("fx.grid.remove()");
+        await p.eval("document.body.appendChild(fx.grid)");
+        await settle(p);
+        eq(await p.eval("fx.grid._menu.hasAttribute('open')"), false, "closed, and it stays closed when the grid comes back");
     });
 
     test("an empty grid still shows focus", async (p) => {
@@ -962,5 +983,101 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.eval("new Promise(r => setTimeout(r, 50))");
         await settle(p);
         eq([(await saves(p)).length, await p.eval("fx.data[1].w1"), await p.eval("fx.grid.dirty")], [1, "away", 0]);
+    });
+
+    test("column menu: a click on the header button hands focus back to the grid", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'n')");
+        await p.type("7");
+        ok((await p.eval("fx.state()")).editing, "editing");
+        const b = await p.eval("fx.center(fx.header(2)._mb)");
+        await p.click(b.x, b.y);
+        await p.frames(2);
+        ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "menu open");
+        eq([(await p.eval("fx.state()")).editing, await p.eval("fx.grid._get(fx.data[0], fx.grid._cols[2])")], [false, 7],
+            "the edit was committed");
+        await p.key("Escape");
+        await p.frames(2);
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "Escape: focus on the grid");
+        await p.click(b.x, b.y);
+        await p.frames(2);
+        const item = await p.eval("fx.center(fx.grid._menu.querySelector('[data-action=sort-desc]'))");
+        await p.click(item.x, item.y);
+        await settle(p);
+        eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "desc" }]);
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "a picked item: focus on the grid");
+        await p.key("ArrowRight");
+        eq((await p.eval("fx.state()")).cur.c, 3, "the keyboard drives the grid again");
+    });
+
+    test("form: Escape closes an open list first, then the form", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.eval("document.querySelector('sac-dialog sac-select').focus()");
+        await p.key("ArrowDown");
+        await p.frames(2);
+        ok(await p.eval("document.querySelector('sac-dialog sac-select').open"), "list open");
+        await p.key("Escape");
+        await p.frames(2);
+        eq([await p.eval("document.querySelector('sac-dialog sac-select').open"), await dialogOpen(p)], [false, true],
+            "the list closed, the form stays");
+        await p.key("Escape");
+        await p.eval("new Promise(r => setTimeout(r, 250))");
+        await p.frames(2);
+        eq(await dialogOpen(p), false, "the next Escape closes the form");
+        ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "focus back on the grid");
+    });
+
+    test("tags: labels in the chip editor and the form; copy and paste use them", async (p) => {
+        await p.load("/test/fixture.html?rows=6&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'tags')");
+        eq(await p.eval("fx.copyText()"), "Ex, Why", "copy writes the labels");
+        await p.key("Enter");
+        await p.frames(2);
+        const chips = "(el) => [...el.shadowRoot.querySelectorAll('sac-chip')].map((c) => c.getAttribute('label'))";
+        eq(await p.eval(`(${chips})(fx.grid._editor.el)`), ["Ex", "Why"], "the cell editor's chips");
+        await p.key("Escape");
+        await settle(p);
+        await p.eval("fx.grid.focusCell(3, 'tags')");
+        await p.eval(`fx.pasteText("why, Fresh\\nHello World")`);
+        await settle(p);
+        eq(await p.eval("[fx.grid._get(fx.data[2], fx.grid._cols[8]), fx.grid._get(fx.data[3], fx.grid._cols[8])]"),
+            [["y", "fresh"], []], "labels and names read back; a new name the chip editor can hold");
+        ok(await p.eval("fx.cellEl(3, 8).classList.contains('invalid')"), "an impossible tag name is rejected");
+        await p.eval("fx.grid.focusCell(1, 'name')");
+        await p.key("Enter", ["Shift"]);
+        await p.frames(3);
+        eq(await p.eval(`(${chips})(document.querySelector('sac-dialog sac-chip-input'))`), ["Ex", "Why"], "the form's chips");
+        await p.key("Escape");
+    });
+
+    test("dates and times read and show text the kit's way", async (p) => {
+        await p.load("/test/fixture.html?rows=3");
+        const r = await p.eval(`(() => {
+            const T = SacDataGridTypes, out = {};
+            try {
+                sac.regional.set({ date: "iso", hourCycle: "h23" });
+                out.iso = [T.parseDate("2026-9-5"), T.parseDate("05.09.2026"), T.parseDate("")];
+                sac.regional.set({ date: "dmy." });
+                out.dmy = [T.parseDate("5.9.26"), T.parseDate("05 . 09 . 2026"), T.parseDate("31.02.2026"), T.formatDate("2026-09-05")];
+                sac.regional.set({ date: "mdy/", hourCycle: "h12" });
+                out.mdy = [T.parseDate("9/5/2026"), T.formatDate("2026-09-05"), T.formatTime("14:30"), T.formatTime("00:05")];
+                out.time = [T.parseTime("2 PM"), T.parseTime("14.30"), T.parseTime("9:5"), T.parseTime("14:30:15"), T.parseTime("14"), T.parseTime("")];
+                out.dt = [T.parseDateTime("9/25/2026 2:30 PM"), T.parseDateTime("9/25/2026"), T.parseDateTime("2026-09-25T14:30"), T.parseDateTime("9/25/2026 25:00")];
+                sac.regional.set({ date: "dmy.", hourCycle: "h23" });
+                out.dt2 = [T.parseDateTime("25. 9. 2026 14:30"), T.formatDateTime("2026-09-25T14:30")];
+            } finally {
+                sac.regional.set({ date: "iso", hourCycle: "h23" });
+            }
+            return out;
+        })()`);
+        eq(r.iso, ["2026-09-05", null, ""], "iso: ISO only");
+        eq(r.dmy, ["2026-09-05", "2026-09-05", null, "05.09.2026"], "day first; no 31 February");
+        eq(r.mdy, ["2026-09-05", "09/05/2026", "2:30 PM", "12:05 AM"], "month first; 12-hour clock");
+        eq(r.time, ["14:00", "14:30", "09:05", "14:30", null, ""], "both cycles; a bare hour is not a time");
+        eq(r.dt, ["2026-09-25T14:30", "2026-09-25T00:00", "2026-09-25T14:30", null], "datetimes");
+        eq(r.dt2, ["2026-09-25T14:30", "25.09.2026 14:30"], "spaces inside the date");
     });
 };
