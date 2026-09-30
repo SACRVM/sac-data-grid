@@ -14,7 +14,6 @@
         "data-grid.any": "Alle",
         "data-grid.select-all": "Alles auswählen",
         "data-grid.row-number": "Zeile",
-        "data-grid.column-menu": "Spaltenmenü",
         "data-grid.filtered": "Gefiltert",
         "data-grid.loading": "Wird geladen …",
         "data-grid.retry": "Erneut versuchen",

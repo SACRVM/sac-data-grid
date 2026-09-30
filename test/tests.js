@@ -9,6 +9,13 @@ const path = require("path");
 
 module.exports = function ({ test, eq, ok, center }) {
 
+    /** A right-click (the column and row menus). */
+    const rclick = async (p, x, y) => {
+        await p.mouse("mouseMoved", x, y, { buttons: 0 });
+        await p.mouse("mousePressed", x, y, { button: "right", buttons: 2 });
+        await p.mouse("mouseReleased", x, y, { button: "right", buttons: 0 });
+    };
+
     /* ------------------------------------------------------ static checks -- */
 
     test("no raw colors in the grid's own styles", async () => {
@@ -180,8 +187,8 @@ module.exports = function ({ test, eq, ok, center }) {
 
     test("filter from the column menu", async (p) => {
         await p.load("/test/fixture.html?rows=300");
-        const mb = await center(p, "fx.header(1)._mb");
-        await p.click(mb.x, mb.y);
+        const mb = await center(p, "fx.header(1)");
+        await rclick(p, mb.x, mb.y);
         await p.frames(2);
         ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "menu open");
         await p.eval(`fx.grid._menu.querySelector('[data-action="filter"]').click()`);
@@ -216,12 +223,94 @@ module.exports = function ({ test, eq, ok, center }) {
         eq((await p.eval("fx.state()")).rows, 25, "date range");
     });
 
+    test("header: the title never moves; the sort mark sits above or below it", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        const geo = (c) => p.eval(`(() => { const h = fx.header(${c}), l = h._lbl.getBoundingClientRect(), s = h._sort.getBoundingClientRect();
+            return { right: Math.round(l.right), left: Math.round(l.left), top: Math.round(l.top), bottom: Math.round(l.bottom),
+                sTop: Math.round(s.top), sBottom: Math.round(s.bottom), sHidden: h._sort.hidden }; })()`);
+        const cellRight = await p.eval("Math.round(fx.cellEl(0, 2).getBoundingClientRect().right)");
+        const pad = await p.eval("parseFloat(getComputedStyle(fx.cellEl(0, 2)).paddingRight)");
+        const rest = await geo(2);
+        eq(rest.right, cellRight - pad, "a right-aligned title ends where its values end");
+        ok(rest.sHidden, "no mark unsorted");
+        const h = await center(p, "fx.header(2)");
+        await p.click(h.x, h.y);
+        await p.eval("fx.ready()");
+        const asc = await geo(2);
+        eq([asc.left, asc.right, asc.top], [rest.left, rest.right, rest.top], "ascending: title unmoved");
+        ok(asc.sBottom <= asc.top, "ascending: the mark is above the title");
+        await p.click(h.x, h.y);
+        await p.eval("fx.ready()");
+        const desc = await geo(2);
+        eq([desc.left, desc.right, desc.top], [rest.left, rest.right, rest.top], "descending: title unmoved");
+        ok(desc.sTop >= desc.bottom, "descending: the mark is below the title");
+        await p.eval(`fx.grid.view = { filter: { n: { op: "range", min: 1, max: 20 } } }`);
+        await p.eval("fx.ready()");
+        const filtered = await geo(2);
+        eq([filtered.left, filtered.right], [rest.left, rest.right], "filtered: title unmoved");
+    });
+
+    test("row-header: marks (default), numbers, none", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const rh = () => p.eval("[fx.cellEl(0, 0).closest('.row')._rh.textContent, Math.round(fx.cellEl(0, 0).closest('.row')._rh.getBoundingClientRect().width), Math.round(fx.cellEl(0, 0).getBoundingClientRect().left - fx.grid._scroller.getBoundingClientRect().left)]");
+        const marks = await rh();
+        eq([marks[0], marks[1]], ["", 24], "marks: narrow, no number");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Delete");
+        await settle(p);
+        ok(await p.eval("fx.cellEl(1, 1).closest('.row')._rh.classList.contains('err')"), "a row with errors is marked");
+        await p.eval("fx.grid.setAttribute('row-header', 'numbers')");
+        await p.frames(2);
+        eq((await rh())[0], "1", "numbers: the position");
+        await p.eval("fx.grid.setAttribute('row-header', 'none')");
+        await p.frames(2);
+        eq((await rh())[2], 0, "none: the data starts at the edge");
+        // Header, body and footer cells: in line, each as wide as its column.
+        const cols = await p.eval(`[0, 1, 2].map((c) => [fx.header(c), fx.cellEl(0, c), fx.grid._fcells[c]]
+            .map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.width)]; })
+            .every(([l, w], i, all) => l === all[0][0] && w === fx.grid._w[c]))`);
+        eq(cols, [true, true, true], "none: every cell stays in its column");
+        const c = await center(p, "fx.cellEl(3, 1)");
+        await p.click(c.x, c.y);
+        eq((await p.eval("fx.state()")).cur, { r: 3, c: 1 }, "clicks still hit the right cell");
+    });
+
+    test("a column with sortable / filterable false offers neither", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval(`fx.grid.columns = fx.grid.columns.map((c, i) => i === 2 ? { ...c, sortable: false, filterable: false } : c)`);
+        await p.frames(2);
+        const h = await center(p, "fx.header(2)");
+        await p.click(h.x, h.y);
+        await p.frames(2);
+        eq(await p.eval("fx.grid.view.sort"), [], "a header click does not sort");
+        await p.eval(`fx.grid.view = { sort: [{ field: "n", dir: "asc" }], filter: { n: { op: "range", min: 1 } } }`);
+        await p.frames(2);
+        eq(await p.eval("[fx.grid.view.sort, fx.grid.view.filter]"), [[], {}], "nor does the view");
+        await p.eval("fx.grid._openColumnMenu(2)");
+        await p.frames(2);
+        eq(await p.eval("[...fx.grid._menu.querySelectorAll('[data-action]')].map((b) => b.dataset.action).filter((a) => /sort|filter/.test(a))"), [],
+            "the menu offers no sort or filter");
+    });
+
+    test("tags show as the kit's chips, in the cell as in the editor", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const c = await p.eval("fx.grid._cols.findIndex((x) => x.typeName === 'tags')");
+        const r = await p.eval(`(() => { let r = 0; while (!(fx.grid._get(fx.grid._rowAt(r), fx.grid._cols[${c}]) || []).length) r++; return r; })()`);
+        const view = await p.eval(`[...fx.cellEl(${r}, ${c}).querySelectorAll("sac-chip")].map((x) => [x.getAttribute("label"), x.getAttribute("color")])`);
+        ok(view.length > 0, "chips in the cell");
+        await p.eval(`fx.focusGrid(); fx.grid.focusCell(fx.grid._idOf(fx.grid._rowAt(${r})), fx.grid._cols[${c}].field)`);
+        await p.key("Enter");
+        await p.frames(3);
+        const edit = await p.eval("[...fx.grid._editor.el.shadowRoot.querySelectorAll('sac-chip')].map((x) => [x.getAttribute('label'), x.getAttribute('color')])");
+        eq(edit, view, "the editor shows the same chips");
+    });
+
     /* -------------------------------------------------------------- columns -- */
 
     test("hide and show columns", async (p) => {
         await p.load("/test/fixture.html?rows=50");
-        const mb = await center(p, "fx.header(3)._mb");
-        await p.click(mb.x, mb.y);
+        const mb = await center(p, "fx.header(3)");
+        await rclick(p, mb.x, mb.y);
         await p.frames(2);
         await p.eval(`fx.grid._menu.querySelector('[data-action="hide"]').click()`);
         await p.frames(2);
@@ -1033,13 +1122,13 @@ module.exports = function ({ test, eq, ok, center }) {
         eq([(await saves(p)).length, await p.eval("fx.data[1].w1"), await p.eval("fx.grid.dirty")], [1, "away", 0]);
     });
 
-    test("column menu: a click on the header button hands focus back to the grid", async (p) => {
+    test("column menu: a right-click on the header hands focus back to the grid", async (p) => {
         await p.load("/test/fixture.html?rows=50");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'n')");
         await p.type("7");
         ok((await p.eval("fx.state()")).editing, "editing");
-        const b = await p.eval("fx.center(fx.header(2)._mb)");
-        await p.click(b.x, b.y);
+        const b = await p.eval("fx.center(fx.header(2))");
+        await rclick(p, b.x, b.y);
         await p.frames(2);
         ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "menu open");
         eq([(await p.eval("fx.state()")).editing, await p.eval("fx.grid._get(fx.data[0], fx.grid._cols[2])")], [false, 7],
@@ -1047,7 +1136,10 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.key("Escape");
         await p.frames(2);
         ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "Escape: focus on the grid");
-        await p.click(b.x, b.y);
+        // The closed panel still takes pointer events while it fades out (160 ms),
+        // and it opened right under the pointer.
+        await p.eval("new Promise(r => setTimeout(r, 250))");
+        await rclick(p, b.x, b.y);
         await p.frames(2);
         const item = await p.eval("fx.center(fx.grid._menu.querySelector('[data-action=sort-desc]'))");
         await p.click(item.x, item.y);

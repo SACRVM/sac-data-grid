@@ -38,11 +38,15 @@
  *   compact-edit — phones (the kit's compact viewport): "form" (default: the
  *                record form is the way to edit, no inline editing) or
  *                "read" (read-only there) (SPEC §7-4).
+ *   row-header — the column before the data: "marks" (default: narrow, it
+ *                shows only a row's state: new, an error), "numbers" (the
+ *                row's position, as in a spreadsheet) or "none".
  *
  * Properties:
  *   columns — [{ field, label, labelKey?, type, width?, minWidth?, frozen?,
  *             editable?, inline?, required?, validate?, options?, format?,
- *             parse?, aggregate?, align?, hidden? }] (types: SacDataGridTypes).
+ *             parse?, aggregate?, align?, hidden?, sortable?, filterable? }]
+ *             (types: SacDataGridTypes).
  *   source  — { key, load, save?, create?, remove? } (SPEC §4). An optional
  *             `pageSize` asks the grid to load that many rows per request.
  *   view    — { columns: { field: { width, hidden } }, sort, filter }, get/set.
@@ -178,7 +182,7 @@
             align-items: center;
             gap: 2px;
             min-width: 0;
-            padding: 0 2px 0 var(--cell-padding-inline, 8px);
+            padding: 0 var(--cell-padding-inline, 8px);
             background: var(--grid-bg);
             font-size: 0.68rem;
             font-weight: 700;
@@ -192,32 +196,46 @@
         .hcell.fz-last { border-right: 1px solid var(--border-strong); }
         .hcell:hover, .corner:hover { color: var(--text); }
         .hcell.sel { color: var(--accent-text); }
-        .hcell .lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .hcell.ar .lbl { text-align: right; }
-        .hcell.ac .lbl { text-align: center; }
-        .hcell .ind { display: inline-flex; align-items: center; flex: none; color: var(--accent-text); --icon-size: 13px; }
-        .hcell .ind[hidden] { display: none; }
-        .hcell .prio { font-size: 0.6rem; letter-spacing: 0; margin-left: 1px; }
-        .hcell .mbtn {
-            display: inline-flex;
+        /* Nothing in a header takes width beside the title, so it lines up
+           with its column's values: the sort mark sits above (ascending) or
+           below (descending) the title, the filter mark at the far edge, and
+           the column menu opens on a right-click (long press, Alt+Down). */
+        .hcell.ar { justify-content: flex-end; }
+        .hcell.ac { justify-content: center; }
+        .hcell.open { color: var(--text); }
+        .hcell.nosort { cursor: default; }
+        .hcell .ttl { position: relative; display: flex; min-width: 0; max-width: 100%; }
+        .hcell .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hcell .sort {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
             align-items: center;
-            justify-content: center;
-            flex: none;
-            width: 22px;
-            height: 22px;
-            padding: 0;
-            border: 0;
-            border-radius: var(--radius-m);
-            background: transparent;
-            color: var(--text-dim);
-            cursor: pointer;
-            opacity: 0;
-            --icon-size: 14px;
-            transition: opacity 120ms var(--ease-smooth), background 120ms var(--ease-smooth);
+            gap: 2px;
+            line-height: 1;
+            color: var(--accent-text);
+            pointer-events: none;
         }
-        .hcell:hover .mbtn, .mbtn.open { opacity: 1; }
-        .mbtn:hover { background: var(--hover); color: var(--text); }
-        @media (hover: none) { .hcell .mbtn { opacity: 1; } }
+        .hcell .sort[hidden] { display: none; }
+        .hcell .sort::before { content: ""; border-inline: 3.5px solid transparent; }
+        .hcell .sort.asc { bottom: 100%; margin-bottom: 2px; }
+        .hcell .sort.asc::before { border-bottom: 4px solid currentColor; }
+        .hcell .sort.desc { top: 100%; margin-top: 2px; }
+        .hcell .sort.desc::before { border-top: 4px solid currentColor; }
+        .hcell .prio { font-size: 0.55rem; letter-spacing: 0; }
+        .hcell .filt {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            display: inline-flex;
+            color: var(--accent-text);
+            background: var(--grid-bg);
+            --icon-size: 12px;
+        }
+        .hcell.ar .filt { right: auto; left: 4px; }
+        .hcell .filt[hidden] { display: none; }
         .hcell .rs {
             position: absolute;
             top: 0;
@@ -282,6 +300,19 @@
         }
         .row:hover > .cell, .row:hover > .rh { --l-hover: var(--row-hover); }
         .rh.sel { --l-sel: var(--accent-tint); color: var(--accent-text); }
+        .rh.err { color: var(--danger-text); }
+        /* row-header="marks": narrow, only a row's state (* new, + the new line, a dot for errors). */
+        .canvas[data-rh="marks"] .rh { padding: 0; text-align: center; }
+        .canvas[data-rh="marks"] .rh.err::before {
+            content: "";
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--danger);
+            vertical-align: middle;
+        }
+        .canvas[data-rh="none"] :is(.rh, .corner, .fcell.first) { display: none; }
         .cell.sel { --l-sel: var(--accent-tint); }
         .cell.dirty { --l-state: var(--dirty-tint); }
         .cell.invalid { --l-state: var(--invalid-tint); box-shadow: inset 0 -1px 0 var(--danger); }
@@ -387,21 +418,7 @@
             -webkit-mask-mode: luminance;
                     mask-mode: luminance;
         }
-        .tag {
-            display: inline-block;
-            vertical-align: middle;
-            max-width: 100%;
-            margin-right: 4px;
-            padding: 0 6px;
-            line-height: 18px;
-            border-radius: var(--radius-m);
-            border: 1px solid color-mix(in srgb, var(--tag) 30%, transparent);
-            background: color-mix(in srgb, var(--tag) 16%, transparent);
-            color: var(--text);
-            font-size: 0.72rem;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        .cell > sac-chip { vertical-align: middle; max-width: 100%; margin-right: 4px; }
         .swatch {
             display: inline-block;
             vertical-align: middle;
@@ -508,7 +525,7 @@
         .btn.primary { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; }
         .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
         .btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .btn:focus-visible, .pager button:focus-visible, .mbtn:focus-visible {
+        .btn:focus-visible, .pager button:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 1px;
         }
@@ -589,11 +606,10 @@
             .pager button { min-width: 44px; height: 44px; }
             .opt { min-height: 44px; }
             .btn { height: 44px; }
-            .hcell .mbtn { min-width: 44px; height: 44px; }
         }
         @media (prefers-reduced-motion: reduce) {
             .row.skel .cell::after { animation: none; }
-            .mbtn, .btn { transition: none; }
+            .btn { transition: none; }
         }
         /* Windows high contrast: shadows and background images are dropped,
            so the cursor, the range and the cell states need system colors. */
@@ -624,7 +640,7 @@
 
 class SacDataGrid extends HTMLElement {
     static get observedAttributes() {
-        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit"];
+        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit", "row-header"];
     }
 
     constructor() {
@@ -709,6 +725,7 @@ class SacDataGrid extends HTMLElement {
         clearTimeout(this._tipTimer);
         this._tipHover = null;
         this._tipCell = null;
+        this._cancelHeadPress();
     }
 
     attributeChangedCallback(name, old, value) {
@@ -730,6 +747,11 @@ class SacDataGrid extends HTMLElement {
                 this._renderStatus();
                 break;
             case "compact-edit":
+                this._stamp++;
+                this._scheduleRender();
+                break;
+            case "row-header":
+                this._layout();
                 this._stamp++;
                 this._scheduleRender();
                 break;
@@ -867,16 +889,18 @@ class SacDataGrid extends HTMLElement {
         this._tipHover = null;
         this._tipTimer = 0;
         this._activeCell = null;
+        this._headPress = null;
+        this._headPressAt = -Infinity;
         // sac-menu has closed and handed focus back when it reports the item.
         this._menu.addEventListener("sac:select", (e) => {
             e.stopPropagation();
             const fn = this._menuActions && this._menuActions[e.detail && e.detail.action];
             if (fn) fn();
         });
-        // Keep the column's menu button shown while its menu is open.
+        // Keep the column's header lit while its menu is open.
         new MutationObserver(() => {
             if (this._menu.hasAttribute("open")) return;
-            for (const h of this._hcells || []) h._mb.classList.remove("open");
+            for (const h of this._hcells || []) h.classList.remove("open");
         }).observe(this._menu, { attributes: true, attributeFilter: ["open"] });
 
         // The kit fields inside (editors, filters, menus) announce their own
@@ -933,6 +957,8 @@ class SacDataGrid extends HTMLElement {
             step: def.step,
             allowCreate: def.allowCreate,
             aggregate: AGGREGATES.includes(def.aggregate) ? def.aggregate : null,
+            sortable: def.sortable !== false,
+            filterable: def.filterable !== false,
             align: ["left", "right", "center"].includes(def.align) ? def.align : type.align,
         };
         col.width = Math.max(col.minWidth, +def.width || type.width || 140);
@@ -959,10 +985,12 @@ class SacDataGrid extends HTMLElement {
             for (const c of this._all) if (!this._seenColumns.has(c.field) && c.def.hidden) this._hidden.add(c.field);
         }
         this._seenColumns = fields;
-        // Sort / filter on a column that is gone would silently shape the data.
-        const sort = this._sort.filter((s) => fields.has(s.field));
+        // Sort / filter on a column that is gone (or no longer takes them)
+        // would silently shape the data.
+        const byField = new Map(this._all.map((c) => [c.field, c]));
+        const sort = this._sort.filter((s) => byField.has(s.field) && byField.get(s.field).sortable);
         const filter = {};
-        for (const [f, d] of Object.entries(this._filter)) if (fields.has(f)) filter[f] = d;
+        for (const [f, d] of Object.entries(this._filter)) if (byField.has(f) && byField.get(f).filterable) filter[f] = d;
         const dataChanged = sort.length !== this._sort.length || Object.keys(filter).length !== Object.keys(this._filter).length;
         this._sort = sort;
         this._filter = filter;
@@ -1014,11 +1042,19 @@ class SacDataGrid extends HTMLElement {
         return fit;
     }
 
+    /** The row header: "marks" (default), "numbers" or "none". */
+    _rhMode() {
+        const v = this.getAttribute("row-header");
+        return v === "numbers" || v === "none" ? v : "marks";
+    }
+
     /** Column geometry → CSS variables; frozen offsets. No layout reads. */
     _layout() {
         const digits = String(Math.max(1, this._base() + this._rowCount())).length;
         this._rhDigits = digits;
-        this._rhW = Math.max(44, 18 + digits * 7);
+        const mode = this._rhMode();
+        this._canvas.dataset.rh = mode;
+        this._rhW = mode === "none" ? 0 : mode === "marks" ? 24 : Math.max(44, 18 + digits * 7);
         const w = this._cols.map((c) => this._widthOf(c));
         const x = [];
         let acc = this._rhW;
@@ -1028,7 +1064,8 @@ class SacDataGrid extends HTMLElement {
         this._rowW = acc;
         this._frozenW = this._nf ? x[this._nf - 1] + w[this._nf - 1] : this._rhW;
         const s = this._canvas.style;
-        s.setProperty("--cols", [this._rhW, ...w].map((n) => n + "px").join(" "));
+        // row-header="none" hides the header cells: no track for them either.
+        s.setProperty("--cols", (mode === "none" ? w : [this._rhW, ...w]).map((n) => n + "px").join(" "));
         s.setProperty("--row-w", acc + "px");
         const lefts = (cells) => {
             for (let c = 0; c < this._nf && c < cells.length; c++) cells[c].style.left = x[c] + "px";
@@ -1064,21 +1101,19 @@ class SacDataGrid extends HTMLElement {
             h.setAttribute("role", "columnheader");
             h.setAttribute("aria-colindex", String(c + 2));
             h._c = c;
+            h.classList.toggle("nosort", !col.sortable);
             const lbl = el("span", "lbl", col.labelText());
-            const sort = el("span", "ind sort");
+            const sort = el("span", "sort");
             sort.hidden = true;
-            const filt = el("span", "ind filt");
+            const ttl = el("span", "ttl");
+            ttl.append(lbl, sort);
+            const filt = el("span", "filt");
             filt.appendChild(icon("search"));
             filt.hidden = true;
-            const mb = el("button", "mbtn");
-            mb.type = "button";
-            mb.tabIndex = -1;
-            mb.setAttribute("aria-label", t("data-grid.column-menu", "Column menu"));
-            mb.appendChild(icon("chevron-down"));
             const rs = el("span", "rs");
             rs.setAttribute("aria-hidden", "true");
-            h.append(lbl, sort, filt, mb, rs);
-            h._lbl = lbl; h._sort = sort; h._filt = filt; h._mb = mb; h._rs = rs;
+            h.append(ttl, filt, rs);
+            h._lbl = lbl; h._sort = sort; h._filt = filt; h._rs = rs;
             row.appendChild(h);
             return h;
         });
@@ -1094,16 +1129,13 @@ class SacDataGrid extends HTMLElement {
             h.title = col.labelText();
             const s = sorted.get(col.field);
             h._sort.hidden = !s;
+            h._sort.className = s ? "sort " + (s.dir === "desc" ? "desc" : "asc") : "sort";
             h._sort.textContent = "";
-            if (s) {
-                h._sort.appendChild(icon(s.dir === "desc" ? "chevron-down" : "chevron-up"));
-                if (this._sort.length > 1) h._sort.appendChild(el("span", "prio", String(s.i + 1)));
-            }
+            if (s && this._sort.length > 1) h._sort.appendChild(el("span", "prio", String(s.i + 1)));
             if (s && s.i === 0) h.setAttribute("aria-sort", s.dir === "desc" ? "descending" : "ascending");
             else h.removeAttribute("aria-sort");
             h._filt.hidden = !this._filter[col.field];
             h._filt.title = t("data-grid.filtered", "Filtered");
-            h._mb.setAttribute("aria-label", t("data-grid.column-menu", "Column menu"));
         });
         this._corner.title = t("data-grid.select-all", "Select all");
         this._corner.firstChild.textContent = t("data-grid.row-number", "Row");
@@ -1141,16 +1173,16 @@ class SacDataGrid extends HTMLElement {
                 }
             }
         }
-        const fields = new Set(this._all.map((c) => c.field));
-        const known = (f) => !this._all.length || fields.has(f);
+        const byField = new Map(this._all.map((c) => [c.field, c]));
+        const known = (f, what) => !this._all.length || (byField.has(f) && byField.get(f)[what]);
         if (Array.isArray(v.sort)) {
             this._sort = v.sort
-                .filter((s) => s && known(s.field))
+                .filter((s) => s && known(s.field, "sortable"))
                 .map((s) => ({ field: s.field, dir: s.dir === "desc" ? "desc" : "asc" }));
         }
         if (v.filter && typeof v.filter === "object") {
             this._filter = {};
-            for (const [f, d] of Object.entries(v.filter)) if (d && known(f)) this._filter[f] = clone(d);
+            for (const [f, d] of Object.entries(v.filter)) if (d && known(f, "filterable")) this._filter[f] = clone(d);
         }
         this._visible();
         if (!initial) {
@@ -1541,7 +1573,7 @@ class SacDataGrid extends HTMLElement {
             return;
         }
         row.classList.remove("msg", "error", "newline");
-        row._rh.textContent = String(idx + 1);
+        row._rh.textContent = this._canvas.dataset.rh === "numbers" ? String(idx + 1) : "";
         const data = this._rowAt(r);
         if (data === undefined) {
             const b = Math.floor(idx / this._bs);
@@ -1557,12 +1589,14 @@ class SacDataGrid extends HTMLElement {
                 cell.classList.remove("dirty", "invalid", "ro");
                 this._cellError(cell, "");
             }
+            row._rh.classList.remove("err");
             return;
         }
         row.classList.remove("skel");
         const editable = this._editable();
         const view = this._view ? this._view(data) : data;    // with unsaved edits, for computed columns
         const editing = this._editor && this._editor.r === r ? this._editor.c : -1;
+        let invalid = false;
         for (let c = 0; c < this._cols.length; c++) {
             const col = this._cols[c], cell = row._cells[c];
             if (c === editing) continue;                        // the editor owns that cell
@@ -1582,7 +1616,9 @@ class SacDataGrid extends HTMLElement {
             cell.classList.toggle("dirty", !!(state && state.dirty));
             cell.classList.toggle("invalid", !!(state && state.error));
             this._cellError(cell, (state && state.error) || "");
+            if (state && state.error) invalid = true;
         }
+        row._rh.classList.toggle("err", invalid);
         if (this._paintRowState) this._paintRowState(row, data);
     }
 
@@ -2316,19 +2352,53 @@ class SacDataGrid extends HTMLElement {
         }
         const h = this._hcellOf(e.target);
         if (!h || e.target.closest(".rs")) return;
-        if (e.target.closest(".mbtn")) { this._openColumnMenu(h._c); return; }
         if (e.target.closest(".filt")) { this._openFilter(h._c); return; }
-        this._toggleSort(this._cols[h._c].field, e.shiftKey);
+        if (this._cols[h._c].sortable) this._toggleSort(this._cols[h._c].field, e.shiftKey);
     }
 
     _onHeadContextMenu(e) {
         const h = this._hcellOf(e.target);
         if (!h) return;
         e.preventDefault();
+        this._cancelHeadPress();
+        if (performance.now() - this._headPressAt < 1000) return;   // the long press opened it
         this._openColumnMenu(h._c, { clientX: e.clientX, clientY: e.clientY });
     }
 
+    /** Touch: a long press on a header opens its menu (no right-click there). */
+    _headLongPress(e) {
+        const h = this._hcellOf(e.target);
+        if (!h || e.target.closest(".rs")) return;
+        this._cancelHeadPress();
+        const x = e.clientX, y = e.clientY;
+        const press = {
+            timer: setTimeout(() => {
+                this._cancelHeadPress();
+                this._headPressAt = performance.now();
+                this._suppressClick = true;
+                this._openColumnMenu(h._c, { clientX: x, clientY: y });
+            }, 500),
+            move: (ev) => { if (Math.hypot(ev.clientX - x, ev.clientY - y) > 10) this._cancelHeadPress(); },
+            end: () => this._cancelHeadPress(),
+        };
+        this._headPress = press;
+        window.addEventListener("pointermove", press.move, true);
+        window.addEventListener("pointerup", press.end, true);
+        window.addEventListener("pointercancel", press.end, true);
+    }
+
+    _cancelHeadPress() {
+        const press = this._headPress;
+        if (!press) return;
+        this._headPress = null;
+        clearTimeout(press.timer);
+        window.removeEventListener("pointermove", press.move, true);
+        window.removeEventListener("pointerup", press.end, true);
+        window.removeEventListener("pointercancel", press.end, true);
+    }
+
     _onHeadPointerDown(e) {
+        if (e.pointerType === "touch") this._headLongPress(e);
         const rs = e.target.closest(".rs");
         if (!rs || e.button !== 0) return;
         const h = this._hcellOf(rs);
@@ -2472,14 +2542,19 @@ class SacDataGrid extends HTMLElement {
         const sorted = this._sort.find((s) => s.field === col.field);
         const hidden = this._all.filter((x) => this._hidden.has(x.field));
         const f = col.field;
+        // A column that takes no sort (or filter) is not offered one.
         const items = [
-            this._menuItem("sort-asc", "chevron-up", t("data-grid.sort-asc", "Sort ascending"), () => this._setSort([{ field: f, dir: "asc" }])),
-            this._menuItem("sort-desc", "chevron-down", t("data-grid.sort-desc", "Sort descending"), () => this._setSort([{ field: f, dir: "desc" }])),
-            sorted ? this._menuItem("sort-clear", "close", t("data-grid.sort-clear", "Clear sort"), () => this._setSort(this._sort.filter((s) => s.field !== f))) : null,
-            el("hr"),
-            this._menuItem("filter", "search", t("data-grid.filter", "Filter…"), () => this._openFilter(this._cols.findIndex((x) => x.field === f))),
-            this._filter[f] ? this._menuItem("filter-clear", "close", t("data-grid.filter-clear", "Clear filter"), () => this._setFilter(f, null)) : null,
-            el("hr"),
+            ...(col.sortable ? [
+                this._menuItem("sort-asc", "chevron-up", t("data-grid.sort-asc", "Sort ascending"), () => this._setSort([{ field: f, dir: "asc" }])),
+                this._menuItem("sort-desc", "chevron-down", t("data-grid.sort-desc", "Sort descending"), () => this._setSort([{ field: f, dir: "desc" }])),
+                sorted ? this._menuItem("sort-clear", "close", t("data-grid.sort-clear", "Clear sort"), () => this._setSort(this._sort.filter((s) => s.field !== f))) : null,
+                el("hr"),
+            ] : []),
+            ...(col.filterable ? [
+                this._menuItem("filter", "search", t("data-grid.filter", "Filter…"), () => this._openFilter(this._cols.findIndex((x) => x.field === f))),
+                this._filter[f] ? this._menuItem("filter-clear", "close", t("data-grid.filter-clear", "Clear filter"), () => this._setFilter(f, null)) : null,
+                el("hr"),
+            ] : []),
             this._menuItem("select-column", "grid", t("data-grid.select-column", "Select column"), () => {
                 const i = this._cols.findIndex((x) => x.field === f);
                 this._scroller.focus({ preventScroll: true });
@@ -2503,8 +2578,8 @@ class SacDataGrid extends HTMLElement {
             }
         }
         const h = this._hcells[c];
-        this._openMenu(items, point || this._pointUnder(h ? h._mb : this._scroller));
-        if (h && this._menu.hasAttribute("open")) h._mb.classList.add("open");
+        this._openMenu(items, point || this._pointUnder(h || this._scroller));
+        if (h && this._menu.hasAttribute("open")) h.classList.add("open");
     }
 
     _setHidden(field, hidden) {
@@ -2541,7 +2616,7 @@ class SacDataGrid extends HTMLElement {
 
     _openFilter(c) {
         const col = this._cols[c];
-        if (!col) return;
+        if (!col || !col.filterable) return;
         this._closeFilter();
         const pop = this._pop;
         const f = col.field;

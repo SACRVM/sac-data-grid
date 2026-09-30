@@ -67,6 +67,7 @@ The grid fills the height you give it (default 420px).
 | `lines` | `quiet` (default) · `grid` | Row lines only, or cell grid lines. |
 | `mode-toggle` | (presence) | Shows a Read · Sheet · Form switch in the footer. |
 | `compact-edit` | `form` (default) · `read` | Phones (the kit's compact viewport): edit through the record form, or read only. |
+| `row-header` | `marks` (default) · `numbers` · `none` | The column before the data. `marks`: narrow, only a row's state (`*` new, `+` the new line, a dot for a row with errors). `numbers`: the row's position, as in a spreadsheet. A click on it selects the row, a right-click opens the row menu. |
 
 `save-mode`, `paging`, `lines` and `compact-edit` are the open owner decisions of SPEC §7
 ([#1](https://github.com/SACRVM/sac-data-grid/issues/1)); the defaults are provisional.
@@ -103,6 +104,7 @@ The grid fills the height you give it (default 420px).
 | `decimals`, `min`, `max`, `step` | `number` (and `min` / `max` / `step` for `date` / `time`). |
 | `allowCreate: false` | `tags`: only the listed options. |
 | `format(value, row)` | The shown text (a computed column: `type: "readonly"` + `format`). |
+| `sortable: false`, `filterable: false` | The column offers no sort / filter (header click, menu, `view`). Set both on a computed column: the source only knows real fields. |
 | `parse(text, row)` | Pasted text → value; throw or return `undefined` to reject. |
 | `aggregate` | Footer total: `sum` · `avg` · `count` · `min` · `max`. |
 | `align` | `left` · `right` · `center` (numbers default right). |
@@ -213,6 +215,14 @@ Copy writes the cells as text: the labels of `select` and `tags`, a long text in
 without grouping, `TRUE` / `FALSE`. Paste reads text back by the kit's `sac.regional` rules, the
 same as the kit's fields: a date in the regional day / month order (ISO always works), a time in
 either hour cycle, a number with either separator.
+
+## Headers
+
+A click sorts, Shift+click adds a key. The sort mark sits above the title for ascending and below
+it for descending, with the key's number when there are several. Nothing sits beside the title,
+so it always lines up with its column's values. A right-click (a long press on touch, Alt+↓)
+opens the column menu: sort, filter, hide and show columns. A filtered column shows a search mark
+at its far edge; a click on it opens the filter.
 
 ## Edit modes
 

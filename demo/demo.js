@@ -23,6 +23,9 @@
         "demo.paging-pages": "Seiten",
         "demo.lines-quiet": "Ruhig",
         "demo.lines-grid": "Gitterlinien",
+        "demo.rh-marks": "Markierungen",
+        "demo.rh-numbers": "Zeilennummern",
+        "demo.rh-none": "Kein Zeilenkopf",
         "demo.regional": "Regionales Format",
         "demo.grid": "Bestellungen",
         "demo.col.id": "Nr.",
@@ -175,6 +178,7 @@
         {
             field: "total", label: "Total", labelKey: "demo.col.total", type: "readonly", width: 130, align: "right",
             format: (v, row) => (row ? money(row.amount * row.qty) : ""),
+            sortable: false, filterable: false,           // computed here, not a field the source knows
         },
         { field: "due", label: "Due", labelKey: "demo.col.due", type: "date", aggregate: "min" },
         { field: "slot", label: "Slot", labelKey: "demo.col.slot", type: "time", step: 15 },
@@ -209,6 +213,7 @@
     on("save-mode", (v) => grid.setAttribute("save-mode", v));
     on("paging", (v) => grid.setAttribute("paging", v));
     on("lines", (v) => grid.setAttribute("lines", v));
+    on("row-header", (v) => grid.setAttribute("row-header", v));
 
     const REGIONAL = {
         iso: { date: "iso", hourCycle: "h23", number: "1,234.5" },

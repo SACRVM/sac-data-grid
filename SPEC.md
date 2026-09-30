@@ -52,9 +52,9 @@ host can show):
 |---|---|
 | Rendering | Row virtualization (100k rows smooth; only visible rows + a small overscan in the DOM). Fixed header and fixed footer. Freeze N left columns (`frozen` on a column). |
 | Data | Pagination **or** incremental loading — one attribute switches (see §4). Sort (multi-column: Shift+click adds a key). Per-column filter (type-aware: text contains, number/date range, select/tags "any of", bool). |
-| Columns | Resize by dragging the header edge (double-click = fit content). Show/hide columns (header menu). Column order fixed in v1. Widths/visibility/sort/filter reportable as a `view` object so a host can persist it. |
+| Columns | Resize by dragging the header edge (double-click = fit content). Show/hide columns (header menu). The column menu opens on a right-click (long press on touch, Alt+↓); there is no header button, so a title lines up with its values, and the sort mark sits above (ascending) or below (descending) the title. Column order fixed in v1. Widths/visibility/sort/filter reportable as a `view` object so a host can persist it. |
 | Editing | Inline, with the kit's editors per column type (§5). Row add (a "new row" line at the end, or `grid.addRow()`), row delete (with `sac.toast` Undo). Dirty cells marked (subtle `--accent-warm` tint, never a thick border). Validation per column (`required`, `validate(value, row) → message|null`); invalid cells marked with `--danger`, message on hover/focus. |
-| Selection | Cell cursor, rectangular range selection, whole row/column via headers, Ctrl+A. |
+| Selection | Cell cursor, rectangular range selection, whole row/column via headers, Ctrl+A. The row header is `row-header="marks"` (default: narrow, only a row's state), `"numbers"` (the position) or `"none"`. |
 | Clipboard | Copy / cut / paste as TSV — round-trips with Excel, Google Sheets, SharePoint. Paste into a range; paste larger than the selection extends from the cursor; values parsed per column type (dates/numbers via `sac.regional`); cells that fail validation are marked and not applied. |
 | Undo | Ctrl+Z / Ctrl+Y over every edit, paste, fill, row add/delete — until saved. |
 | Footer | Row count, selection info (count / sum / avg of a numeric range), per-column aggregates (`aggregate: "sum" | "avg" | "count" | "min" | "max"`). |
@@ -139,7 +139,7 @@ changed — persist it if you like), `sac:load-error`.
 | `select` | label | `<sac-select size="cell">` (searchable) |
 | `tags` | chips | `<sac-chip-input size="cell">` |
 | `color` | swatch | `<sac-color-field size="cell">` |
-| `readonly` / computed | `format(value, row)` | none |
+| `readonly` / computed | `format(value, row)`; a computed column sets `sortable: false` / `filterable: false` (the source knows only real fields) | none |
 
 Custom types: `{ render(value, row), editor(cell) → HTMLElement, parse, format }`.
 

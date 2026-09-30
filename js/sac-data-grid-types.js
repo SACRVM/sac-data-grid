@@ -492,12 +492,12 @@
         render(cell, v, col) {
             const list = Array.isArray(v) ? v : [];
             cell.textContent = "";
+            // The kit's chip, the one the chip editor shows: view and edit look alike.
             for (const name of list) {
                 const o = findOption(col, name);
-                const chip = document.createElement("span");
-                chip.className = "tag";
-                chip.style.setProperty("--tag", `var(--palette-${slot(o && o.color)})`);
-                chip.textContent = o ? optionLabel(o) : String(name);
+                const chip = document.createElement("sac-chip");
+                chip.setAttribute("color", slot(o && o.color));
+                chip.setAttribute("label", o ? optionLabel(o) : String(name));
                 cell.appendChild(chip);
             }
         },
