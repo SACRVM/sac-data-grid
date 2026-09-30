@@ -239,8 +239,10 @@ either hour cycle, a number with either separator.
 
 ARIA grid pattern: `role="grid"` with `aria-rowcount` / `aria-colcount` (virtualized),
 `aria-rowindex` / `aria-colindex`, `aria-selected`, `aria-readonly`, `aria-sort`,
-`aria-activedescendant` for the cursor, `aria-invalid` on invalid cells, and a live region for
-load and save errors.
+`aria-activedescendant` for the cursor, `aria-invalid` and the message as `aria-description` on
+invalid cells, and a live region for load and save errors. The message also shows in the kit's
+`sac-tooltip` bubble, on hover and on the cursor cell while the grid has focus, so the page needs
+`sac-tooltip.js` (it is in `kit/js/all.js`).
 
 ## Develop
 

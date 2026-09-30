@@ -706,6 +706,9 @@ class SacDataGrid extends HTMLElement {
         if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
         this._closeFilter();
         if (this._menu && typeof this._menu.close === "function") this._menu.close();
+        clearTimeout(this._tipTimer);
+        this._tipHover = null;
+        this._tipCell = null;
     }
 
     attributeChangedCallback(name, old, value) {
@@ -857,6 +860,13 @@ class SacDataGrid extends HTMLElement {
         this._pop = $(".pop");
         this._menu = document.createElement("sac-menu");
         this.shadowRoot.appendChild(this._menu);
+        // One kit bubble for validation messages, moved to the cell it explains.
+        this._tip = document.createElement("sac-tooltip");
+        this.shadowRoot.appendChild(this._tip);
+        this._tipCell = null;
+        this._tipHover = null;
+        this._tipTimer = 0;
+        this._activeCell = null;
         // sac-menu has closed and handed focus back when it reports the item.
         this._menu.addEventListener("sac:select", (e) => {
             e.stopPropagation();
@@ -878,6 +888,9 @@ class SacDataGrid extends HTMLElement {
         this._scroller.addEventListener("scroll", () => this._onScroll(), { passive: true });
         this._scroller.addEventListener("keydown", (e) => this._onKeydown(e));
         this._scroller.addEventListener("focus", () => this._paintSelection());
+        this._scroller.addEventListener("blur", () => this._syncTip());
+        this._body.addEventListener("pointerover", (e) => this._onBodyPointerOver(e));
+        this._body.addEventListener("pointerout", (e) => this._onBodyPointerOut(e));
         this._body.addEventListener("pointerdown", (e) => this._onBodyPointerDown(e));
         this._body.addEventListener("dblclick", (e) => this._onBodyDblClick(e));
         this._body.addEventListener("contextmenu", (e) => this._onBodyContextMenu(e));
@@ -1542,8 +1555,7 @@ class SacDataGrid extends HTMLElement {
             for (const cell of row._cells) {
                 if (cell._text !== "") { cell.textContent = ""; cell._text = ""; }
                 cell.classList.remove("dirty", "invalid", "ro");
-                cell.removeAttribute("title");
-                cell.removeAttribute("aria-invalid");
+                this._cellError(cell, "");
             }
             return;
         }
@@ -1569,15 +1581,22 @@ class SacDataGrid extends HTMLElement {
             const state = this._cellState ? this._cellState(data, col) : null;
             cell.classList.toggle("dirty", !!(state && state.dirty));
             cell.classList.toggle("invalid", !!(state && state.error));
-            if (state && state.error) {
-                cell.title = state.error;
-                cell.setAttribute("aria-invalid", "true");
-            } else {
-                cell.removeAttribute("title");
-                cell.removeAttribute("aria-invalid");
-            }
+            this._cellError(cell, (state && state.error) || "");
         }
         if (this._paintRowState) this._paintRowState(row, data);
+    }
+
+    /** A cell's validation message: the bubble's text, and its accessible description. */
+    _cellError(cell, msg) {
+        if (cell._err === msg) return;
+        cell._err = msg;
+        if (msg) {
+            cell.setAttribute("aria-invalid", "true");
+            cell.setAttribute("aria-description", msg);
+        } else {
+            cell.removeAttribute("aria-invalid");
+            cell.removeAttribute("aria-description");
+        }
     }
 
     _fillNote(row, note) {
@@ -1632,6 +1651,60 @@ class SacDataGrid extends HTMLElement {
         }
         if (active) this._scroller.setAttribute("aria-activedescendant", active.id);
         else this._scroller.removeAttribute("aria-activedescendant");
+        this._activeCell = active;
+        this._syncTip();
+    }
+
+    /* ------------------------------------------------------ error bubble -- */
+
+    /**
+     * The validation bubble shows on the hovered invalid cell, else on the
+     * cursor cell while the grid itself has focus (keyboard users get no
+     * hover). `force` shows it again after the bubble hid itself (scroll,
+     * Escape, the pointer leaving); without it an unchanged target stays
+     * as it is, so a render while scrolling does not bring it back.
+     */
+    _syncTip(force) {
+        const tip = this._tip;
+        if (!tip || typeof tip.attachTo !== "function") return;
+        const hover = this._tipHover;
+        const cur = this._activeCell;
+        let cell = hover && hover.isConnected && hover._err ? hover : null;
+        if (!cell && cur && cur._err && !this._editor && this.shadowRoot.activeElement === this._scroller) cell = cur;
+        if (!cell) {
+            // Emptied, not only hidden: the bubble listens to its anchor
+            // itself, and an editor in that cell would bring it back.
+            if (this._tipCell) { this._tipCell = null; tip.removeAttribute("content"); tip.hide(); }
+            return;
+        }
+        if (!force && cell === this._tipCell && tip.getAttribute("content") === cell._err) return;
+        this._tipCell = cell;
+        tip.attachTo(cell);
+        tip.setAttribute("content", cell._err);
+        tip.show();
+    }
+
+    _onBodyPointerOver(e) {
+        if (e.pointerType === "touch") return;
+        const cell = e.target.closest && e.target.closest(".cell");
+        if (!cell || cell === this._tipHover) return;
+        clearTimeout(this._tipTimer);
+        this._tipHover = null;
+        if (!cell._err) return;
+        this._tipTimer = setTimeout(() => {
+            this._tipHover = cell;
+            this._syncTip(true);
+        }, 400);
+    }
+
+    _onBodyPointerOut(e) {
+        if (e.pointerType === "touch") return;
+        const cell = e.target.closest && e.target.closest(".cell");
+        if (!cell || (e.relatedTarget && cell.contains(e.relatedTarget))) return;
+        clearTimeout(this._tipTimer);
+        const was = this._tipHover;
+        this._tipHover = null;
+        if (was) this._syncTip(true);
     }
 
     _renderFoot() {

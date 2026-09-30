@@ -493,7 +493,7 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.key("Delete");
         await settle(p);
         ok(await p.eval("fx.cellEl(1, 1).classList.contains('invalid')"), "marked invalid");
-        eq(await p.eval("fx.cellEl(1, 1).title"), "Required");
+        eq(await p.eval("fx.cellEl(1, 1).getAttribute('aria-description')"), "Required");
         eq(await p.eval("fx.cellEl(1, 1).getAttribute('aria-invalid')"), "true");
         await p.key("ArrowDown");
         await settle(p);
@@ -503,11 +503,45 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.type("-5");
         await p.key("Enter");
         await settle(p);
-        eq(await p.eval("fx.cellEl(4, 2).title"), "negative", "validate()");
+        eq(await p.eval("fx.cellEl(4, 2).getAttribute('aria-description')"), "negative", "validate()");
         await p.key("z", ["Control"]);
         await p.key("z", ["Control"]);
         await settle(p);
         eq(await p.eval("[fx.cellEl(1, 1).classList.contains('invalid'), fx.grid.dirty]"), [false, 0], "undo clears it");
+    });
+
+    test("the error bubble shows on the cursor cell and on hover", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const tip = (cell) => p.eval(`(() => { const t = fx.grid._tip, b = t.shadowRoot.querySelector(".bubble");
+            return [b.classList.contains("shown"), b.textContent, ${cell ? `t._anchorEl === ${cell}` : "null"}]; })()`);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Delete");
+        await settle(p);
+        eq(await tip("fx.cellEl(1, 1)"), [true, "Required", true], "on the invalid cursor cell");
+        eq(await p.eval("fx.cellEl(1, 1).title"), "", "no native tooltip");
+        await p.key("ArrowRight");
+        await p.frames(2);
+        eq((await tip())[0], false, "gone on a valid cell");
+        await p.key("ArrowLeft");
+        await p.frames(2);
+        eq(await tip("fx.cellEl(1, 1)"), [true, "Required", true], "back on it");
+        await p.key("Enter");
+        await p.frames(2);
+        eq((await tip())[0], false, "hidden while editing");
+        await p.key("Escape");
+        await p.frames(2);
+        eq((await tip())[0], true, "back after the editor closes");
+        await p.eval("fx.grid._scroller.blur()");
+        await p.frames(2);
+        eq((await tip())[0], false, "hidden when the grid loses focus");
+        const c = await center(p, "fx.cellEl(1, 1)");
+        await p.mouse("mouseMoved", c.x, c.y, { buttons: 0 });
+        await p.eval("new Promise(r => setTimeout(r, 500))");
+        eq(await tip("fx.cellEl(1, 1)"), [true, "Required", true], "on hover");
+        const o = await center(p, "fx.cellEl(5, 3)");
+        await p.mouse("mouseMoved", o.x, o.y, { buttons: 0 });
+        await p.frames(2);
+        eq((await tip())[0], false, "gone when the pointer leaves");
     });
 
     test("save errors from the source keep cells dirty and marked", async (p) => {
@@ -517,7 +551,7 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.key("Enter");
         await settle(p);
         eq((await saves(p)).length, 1, "sent");
-        eq(await p.eval("fx.cellEl(0, 12).title"), "Server says no");
+        eq(await p.eval("fx.cellEl(0, 12).getAttribute('aria-description')"), "Server says no");
         eq(await p.eval("fx.grid.dirty"), 1, "still dirty");
         const ev = await p.eval("fx.events.filter(e => e.type === 'sac:save').map(e => e.detail.errors.length)");
         eq(ev, [1], "sac:save carries the errors");
@@ -634,7 +668,7 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("[0, 1].map(i => [fx.grid._get(fx.data[i], fx.grid._cols[2]), fx.grid._get(fx.data[i], fx.grid._cols[3])])"),
             [[1234.5, "2026-03-04"], [3.7, "2026-05-04"]], "parsed per type; the bad number not applied");
         ok(await p.eval("fx.cellEl(1, 2).classList.contains('invalid')"), "bad cell marked");
-        ok((await p.eval("fx.cellEl(1, 2).title")).includes("abc"), "with the rejected text");
+        ok((await p.eval("fx.cellEl(1, 2).getAttribute('aria-description')")).includes("abc"), "with the rejected text");
         await p.eval("sac.regional.set({ number: '1,234.5', date: 'iso' })");
         await p.eval("fx.grid.focusCell(6, 'name')");
         await p.eval(`fx.pasteText("x1\\ny1\\nz1")`);
@@ -953,14 +987,14 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.eval("fx.grid.remove()");
         await p.frames(2);
         eq(await p.eval("!!document.querySelector('sac-dialog')"), false, "the form is gone");
-        await p.eval("document.body.appendChild(fx.grid)");
+        await p.eval("void document.body.appendChild(fx.grid)");
         await settle(p);
         await p.eval("fx.focusGrid()");
         await p.key("ArrowDown", ["Alt"]);
         await p.frames(2);
         ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "menu open");
         await p.eval("fx.grid.remove()");
-        await p.eval("document.body.appendChild(fx.grid)");
+        await p.eval("void document.body.appendChild(fx.grid)");
         await settle(p);
         eq(await p.eval("fx.grid._menu.hasAttribute('open')"), false, "closed, and it stays closed when the grid comes back");
     });
