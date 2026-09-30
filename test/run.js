@@ -244,6 +244,9 @@ require(process.env.TESTS ? path.resolve(process.env.TESTS) : "./tests.js")({ te
     const page = new Page(cdp, sessionId, base);
     debug("attached", sessionId);
     await page.send("Page.bringToFront");
+    // The page must count as focused throughout: some headless builds (seen on
+    // Windows) drop window focus between tests, and then focus / focusout never fire.
+    await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     await page.send("Page.enable");
     await page.send("Runtime.enable");
     await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
