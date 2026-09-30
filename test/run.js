@@ -22,6 +22,11 @@ const FILTER = process.argv[2] || "";
 const SHOTS = process.env.SHOTS || "";
 const debug = (...a) => { if (process.env.DEBUG) console.error("[debug]", ...a); };
 
+if (typeof WebSocket === "undefined") {
+    console.error(`Node ${process.version} has no built-in WebSocket; the tests need Node >= 22.`);
+    process.exit(1);
+}
+
 /* ---------------------------------------------------------------- server -- */
 
 const MIME = {
@@ -50,9 +55,11 @@ function serve() {
 
 function findChrome() {
     const list = [process.env.CHROME, "/opt/pw-browsers/chromium", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].filter(Boolean);
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ...[process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean)
+            .map((dir) => path.join(dir, "Google", "Chrome", "Application", "chrome.exe"))].filter(Boolean);
     for (const c of list) {
-        if (c.includes("/") ? fs.existsSync(c) : (() => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch (e) { return false; } })()) return c;
+        if (path.isAbsolute(c) ? fs.existsSync(c) : (() => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch (e) { return false; } })()) return c;
     }
     throw new Error("No Chrome found — set CHROME=/path/to/chrome");
 }

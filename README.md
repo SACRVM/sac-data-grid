@@ -248,7 +248,7 @@ load and save errors.
   source, a paged "server" with latency (`?fail=N` fails every Nth load), and switches for mode,
   save mode, paging, lines, regional format, language and theme.
 - `node test/run.js [filter]` runs the headless-Chrome tests over the DevTools protocol.
-  No dependencies; `CHROME=/path/to/chrome` picks the browser.
+  Needs Node >= 22 (built-in WebSocket), no dependencies; `CHROME=/path/to/chrome` picks the browser.
 - `kit/` is the vendored kit release. Never edit it here; upgrade by replacing the folder.
 
 MIT License.
