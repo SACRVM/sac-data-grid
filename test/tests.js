@@ -510,6 +510,20 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("[fx.cellEl(1, 1).classList.contains('invalid'), fx.grid.dirty]"), [false, 0], "undo clears it");
     });
 
+    test("double-click edits the cell and keeps its value", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const c = await center(p, "fx.cellEl(2, 1)");
+        await p.click(c.x, c.y, { count: 2 });
+        await p.frames(3);
+        eq(await p.eval("[fx.grid._editor && fx.grid._editor.col.field, fx.grid._editor && fx.grid._editor.el.value]"), ["name", "Clara 3"], "editor with the value");
+        await p.key("Escape");
+        await p.frames(2);
+        const h = await center(p, "fx.cellEl(2, 1).closest('.row')._rh");
+        await p.click(h.x, h.y, { count: 2 });
+        await p.frames(3);
+        ok(await dialogOpen(p), "on the row header: the record form");
+    });
+
     test("the error bubble shows on the cursor cell and on hover", async (p) => {
         await p.load("/test/fixture.html?rows=20");
         const tip = (cell) => p.eval(`(() => { const t = fx.grid._tip, b = t.shadowRoot.querySelector(".bubble");

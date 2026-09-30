@@ -2187,6 +2187,7 @@ class SacDataGrid extends HTMLElement {
     }
 
     _onBodyPointerDown(e) {
+        this._downAt = null;
         if (e.button !== 0 && e.button !== 2) return;
         if (this._editor) {
             if (this._inEditor && this._inEditor(e)) return;      // clicks inside the editor are its own
@@ -2202,6 +2203,7 @@ class SacDataGrid extends HTMLElement {
         // Remembered here: pointer capture sends the click to the body.
         this._tapActive = !!cell && !e.shiftKey && r === this._cur.r && cell._c === this._cur.c;
         this._tapCell = cell ? { r, c: cell._c } : null;
+        this._downAt = { r, c: cell ? cell._c : null };
         e.preventDefault();
         this._scroller.focus({ preventScroll: true });
         if (e.button === 2) {
@@ -2283,10 +2285,11 @@ class SacDataGrid extends HTMLElement {
     }
 
     _onBodyDblClick(e) {
-        const row = this._rowOf(e.target);
-        if (!row) return;
-        const cell = e.target.closest(".cell");
-        if (this._onCellDblClick) this._onCellDblClick(row._r, cell ? cell._c : null, e);
+        // Pointer capture sends the dblclick to the body, not the cell: use
+        // where the second press landed (null: in an editor, on a button).
+        const at = this._downAt;
+        this._downAt = null;
+        if (at && this._onCellDblClick) this._onCellDblClick(at.r, at.c, e);
     }
 
     _onBodyContextMenu(e) {
