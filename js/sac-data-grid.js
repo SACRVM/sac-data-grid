@@ -198,8 +198,8 @@
         .hcell.sel { color: var(--accent-text); }
         /* Nothing in a header takes width beside the title, so it lines up
            with its column's values: the sort mark sits above (ascending) or
-           below (descending) the title, the filter mark at the far edge, and
-           the column menu opens on a right-click (long press, Alt+Down). */
+           below (descending) the title, a filter tints the title, and the
+           column menu opens on a right-click (long press, Alt+Down). */
         .hcell.ar { justify-content: flex-end; }
         .hcell.ac { justify-content: center; }
         .hcell.open { color: var(--text); }
@@ -224,18 +224,13 @@
         .hcell .sort.desc { top: 100%; margin-top: 2px; }
         .hcell .sort.desc::before { border-top: 4px solid currentColor; }
         .hcell .prio { font-size: 0.55rem; letter-spacing: 0; }
-        .hcell .filt {
-            position: absolute;
-            top: 50%;
-            right: 8px;
-            transform: translateY(-50%);
-            display: inline-flex;
+        /* A filtered column: its title in the accent colour, dotted
+           underline (the colour alone is also the cursor column's). */
+        .hcell.filtered .lbl {
             color: var(--accent-text);
-            background: var(--grid-bg);
-            --icon-size: 12px;
+            text-decoration: underline dotted 1px;
+            text-underline-offset: 2px;
         }
-        .hcell.ar .filt { right: auto; left: 4px; }
-        .hcell .filt[hidden] { display: none; }
         .hcell .rs {
             position: absolute;
             top: 0;
@@ -1107,13 +1102,10 @@ class SacDataGrid extends HTMLElement {
             sort.hidden = true;
             const ttl = el("span", "ttl");
             ttl.append(lbl, sort);
-            const filt = el("span", "filt");
-            filt.appendChild(icon("search"));
-            filt.hidden = true;
             const rs = el("span", "rs");
             rs.setAttribute("aria-hidden", "true");
-            h.append(ttl, filt, rs);
-            h._lbl = lbl; h._sort = sort; h._filt = filt; h._rs = rs;
+            h.append(ttl, rs);
+            h._lbl = lbl; h._sort = sort; h._rs = rs;
             row.appendChild(h);
             return h;
         });
@@ -1125,8 +1117,9 @@ class SacDataGrid extends HTMLElement {
         const sorted = new Map(this._sort.map((s, i) => [s.field, { dir: s.dir, i }]));
         this._cols.forEach((col, c) => {
             const h = this._hcells[c];
+            const filtered = !!this._filter[col.field];
             h._lbl.textContent = col.labelText();
-            h.title = col.labelText();
+            h.title = filtered ? `${col.labelText()} · ${t("data-grid.filtered", "Filtered")}` : col.labelText();
             const s = sorted.get(col.field);
             h._sort.hidden = !s;
             h._sort.className = s ? "sort " + (s.dir === "desc" ? "desc" : "asc") : "sort";
@@ -1134,8 +1127,9 @@ class SacDataGrid extends HTMLElement {
             if (s && this._sort.length > 1) h._sort.appendChild(el("span", "prio", String(s.i + 1)));
             if (s && s.i === 0) h.setAttribute("aria-sort", s.dir === "desc" ? "descending" : "ascending");
             else h.removeAttribute("aria-sort");
-            h._filt.hidden = !this._filter[col.field];
-            h._filt.title = t("data-grid.filtered", "Filtered");
+            h.classList.toggle("filtered", filtered);
+            if (filtered) h.setAttribute("aria-description", t("data-grid.filtered", "Filtered"));
+            else h.removeAttribute("aria-description");
         });
         this._corner.title = t("data-grid.select-all", "Select all");
         this._corner.firstChild.textContent = t("data-grid.row-number", "Row");
@@ -2352,7 +2346,6 @@ class SacDataGrid extends HTMLElement {
         }
         const h = this._hcellOf(e.target);
         if (!h || e.target.closest(".rs")) return;
-        if (e.target.closest(".filt")) { this._openFilter(h._c); return; }
         if (this._cols[h._c].sortable) this._toggleSort(this._cols[h._c].field, e.shiftKey);
     }
 

@@ -221,8 +221,8 @@ either hour cycle, a number with either separator.
 A click sorts, Shift+click adds a key. The sort mark sits above the title for ascending and below
 it for descending, with the key's number when there are several. Nothing sits beside the title,
 so it always lines up with its column's values. A right-click (a long press on touch, Alt+↓)
-opens the column menu: sort, filter, hide and show columns. A filtered column shows a search mark
-at its far edge; a click on it opens the filter.
+opens the column menu: sort, filter, hide and show columns. A filtered column's title turns the
+accent colour with a dotted underline.
 
 ## Edit modes
 

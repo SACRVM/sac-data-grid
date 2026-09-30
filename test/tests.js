@@ -200,7 +200,7 @@ module.exports = function ({ test, eq, ok, center }) {
         const s = await p.eval("fx.state()");
         eq(s.rows, 43, "43 of 300 names contain anna");
         eq(await p.eval("fx.grid.view.filter"), { name: { op: "contains", value: "anna" } });
-        ok(!(await p.eval("fx.header(1)._filt.hidden")), "filter indicator");
+        ok(await p.eval("fx.header(1).classList.contains('filtered')"), "filter indicator");
         await p.eval("fx.grid.view = { filter: {} }");
         await p.eval("fx.ready()");
         eq((await p.eval("fx.state()")).rows, 300, "cleared");
@@ -248,6 +248,7 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.eval("fx.ready()");
         const filtered = await geo(2);
         eq([filtered.left, filtered.right], [rest.left, rest.right], "filtered: title unmoved");
+        eq(await p.eval("[fx.header(2).classList.contains('filtered'), fx.header(2).getAttribute('aria-description')]"), [true, "Filtered"], "filtered: marked");
     });
 
     test("row-header: marks (default), numbers, none", async (p) => {
