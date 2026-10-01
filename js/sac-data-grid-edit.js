@@ -61,6 +61,25 @@
         this._undo = [];
         this._redo = [];
         this._saving = 0;
+        this._edGen = 0;                // bumped when the edits are dropped wholesale
+    };
+
+    /** A new source: the old one's unsaved edits, new rows and undo steps
+     *  belong to it, not to this one. Saves still in flight are ignored. */
+    P._onSourceChange = function () {
+        if (!this._edits) return;
+        if (this._editor) this._cancelEdit(this._editorHasFocus());
+        for (const e of this._edits.values()) {
+            if (e.toast) { try { e.toast.dismiss(); } catch (err) { /* gone */ } }
+        }
+        this._edits.clear();
+        this._creates = [];
+        this._savedCreates = new WeakSet();
+        this._undo = [];
+        this._redo = [];
+        this._edGen++;
+        this._stats = null;
+        this._extraEl._t = null;
     };
 
     P._compact = function () {
@@ -382,7 +401,7 @@
             const e = this._entryFor(row);
             e.errors[col.field] = res.error;
             this._announce(res.error);
-        } else if (!same(res.value, ed.start)) {
+        } else if (!same(res.value, ed.start) || ((this._entryOf(row) || {}).errors || {})[col.field]) {
             this._applyChanges([{ row, col, value: res.value }], true);
         }
         this._stamp++;
@@ -471,12 +490,13 @@
         else delete e.errors[f];
     };
 
-    /** Before a save: a new row checks every column, a changed one its changes. */
+    /** Before a save: a new row checks every column, a changed one its changes
+     *  and every field still marked (a rejected text, an earlier save error). */
     P._validateEntry = function (e) {
         if (e.op === "delete") return true;
         for (const col of this._all) {
             if (col.readonly) continue;
-            if (e.op === "create" || has(e.fields, col.field)) this._validateField(e, col);
+            if (e.op === "create" || has(e.fields, col.field) || has(e.errors, col.field)) this._validateField(e, col);
         }
         return !Object.keys(e.errors).length;
     };
@@ -493,7 +513,12 @@
             const e = this._entryFor(row);
             const f = col.field;
             const old = has(e.fields, f) ? e.fields[f] : row[f];
-            if (same(old, value)) continue;
+            if (same(old, value)) {
+                // Confirming the value it holds clears an error a rejected
+                // text or paste left there.
+                if (has(e.errors, f)) { this._validateField(e, col); ids.push(e.id); this._stamp++; }
+                continue;
+            }
             if (!has(e.orig, f)) e.orig[f] = copy(row[f]);
             if (e.op !== "create" && same(value, e.orig[f])) delete e.fields[f];
             else e.fields[f] = copy(value);
@@ -752,8 +777,17 @@
         const result = { saved: [], errors: [], invalid: [] };
         if (!src || typeof src.save !== "function") return result;
         if (this._editor) this._commitEdit(null);
+        const gen = this._edGen;
         let entries = ids ? ids.map((id) => this._edits.get(id)).filter(Boolean) : [...this._edits.values()];
-        entries = entries.filter((e) => !e.saving && !e.pendingDelete && this._isDirtyEntry(e));
+        // A row already on its way: wait for that save, then send what
+        // changed meanwhile (else it would stay dirty and unsent).
+        const busy = [...new Set(entries.filter((e) => e.saving).map((e) => e.saving))];
+        if (busy.length) {
+            await Promise.all(busy);
+            if (gen !== this._edGen) return result;
+            return this._save(ids);
+        }
+        entries = entries.filter((e) => !e.pendingDelete && this._isDirtyEntry(e));
         if (!entries.length) return result;
         const ready = [];
         for (const e of entries) {
@@ -769,8 +803,10 @@
 
         const key = this._keyField();
         const sent = new Map();
+        let settle;
+        const settled = new Promise((resolve) => { settle = resolve; });
         for (const e of ready) {
-            e.saving = true;
+            e.saving = settled;                 // truthy while in flight; a later save awaits it
             sent.set(e, { fields: copy(e.fields), op: e.op, id: e.id });
         }
         this._saving++;
@@ -818,6 +854,11 @@
         } finally {
             this._saving--;
         }
+        if (gen !== this._edGen) {          // the source changed meanwhile: not ours any more
+            settle();
+            this._renderStatus();
+            return result;
+        }
 
         const saved = new Set(result.saved.map(String));
         const errors = new Map();
@@ -828,7 +869,7 @@
         }
         let reload = false;
         for (const e of ready) {
-            e.saving = false;
+            e.saving = null;
             const snap = sent.get(e);
             const errs = errors.get(String(snap.id));
             if (errs) {
@@ -868,6 +909,7 @@
             this._tidy(e.id);
         }
         for (const e of ready) if (!e.saving && e.op === "update") this._tidy(e.id);
+        settle();
         this._stamp++;
         this._stats = null;
         this._extraEl._t = null;

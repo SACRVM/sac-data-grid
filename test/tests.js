@@ -648,6 +648,56 @@ module.exports = function ({ test, eq, ok, center }) {
         eq((await tip())[0], false, "gone when the pointer leaves");
     });
 
+    test("a new source drops the old one's unsaved edits", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(5, 'name')");
+        await p.type("Changed");
+        await p.key("Enter");
+        await p.eval("fx.grid.addRow({ name: 'Extra' })");
+        await settle(p);
+        eq(await p.eval("fx.grid.dirty"), 2, "two unsaved rows");
+        await p.eval("fx.grid.source = SacDataGrid.arraySource(fx.data.map((r) => Object.assign({}, r)), { key: 'id' })");
+        await settle(p);
+        eq(await p.eval("[fx.grid.dirty, fx.cell(4, 1), fx.state().rows]"), [0, "Emma 5", 20], "nothing carried over");
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await p.eval("fx.cell(4, 1)"), "Emma 5", "no undo steps carried over");
+    });
+
+    test("an edit made while its row is saving is saved after it", async (p) => {
+        await p.load("/test/fixture.html?rows=20&source=server&save-mode=cell");
+        await p.eval(`(() => {
+            const g = fx.grid, row = g._rowAt(0), col = (f) => g._cols.find((c) => c.field === f);
+            g._applyChanges([{ row, col: col("name"), value: "First" }]);
+            g._save([row.id]);
+            g._applyChanges([{ row, col: col("w1"), value: "second" }]);
+            g._save([row.id]);
+        })()`);
+        await p.eval("new Promise((r) => setTimeout(r, 300))");
+        await settle(p);
+        eq(await p.eval("fx.grid.dirty"), 0, "nothing left unsaved");
+        eq(await p.eval("fx.log.filter((l) => l[0] === 'save').map((l) => l[1].map((c) => Object.keys(c.fields)))"), [[["name"]], [["w1"]]],
+            "the second change went out after the first");
+    });
+
+    test("confirming a valid value clears a rejected text's error", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'n')");
+        await p.eval(`fx.grid._entryFor(fx.grid._rowAt(1)).errors.n = "Not a valid value: abc"`);
+        await p.eval("fx.grid._stamp++; fx.grid._scheduleRender()");
+        await p.frames(2);
+        ok(await p.eval("fx.cellEl(1, 2).classList.contains('invalid')"), "marked");
+        await p.key("Enter");
+        await p.frames(2);
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("[fx.cellEl(1, 2).classList.contains('invalid'), fx.grid.dirty]"), [false, 0], "the held value is fine again");
+        await p.eval(`fx.grid._entryFor(fx.grid._rowAt(3)).errors.n = "Not a valid value: x"`);
+        await p.eval("fx.grid._applyChanges([{ row: fx.grid._rowAt(3), col: fx.grid._cols[1], value: 'Other' }], true)");
+        const res = await p.eval("fx.grid.save().then((r) => [r.invalid.length, r.saved.length])");
+        eq(res, [0, 1], "a stale error does not hold back a save");
+    });
+
     test("save errors from the source keep cells dirty and marked", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-error=1");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");

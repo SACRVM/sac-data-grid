@@ -772,6 +772,7 @@ class SacDataGrid extends HTMLElement {
 
     get source() { return this._source; }
     set source(v) {
+        if (this._onSourceChange && v !== this._source) this._onSourceChange();
         this._source = v || null;
         if (!this._built) return;
         this._resetSelection();
