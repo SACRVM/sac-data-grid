@@ -258,6 +258,14 @@ invalid cells, and a live region for load and save errors. The message also show
 `sac-tooltip` bubble, on hover and on the cursor cell while the grid has focus, so the page needs
 `sac-tooltip.js` (it is in `kit/js/all.js`).
 
+## Use in an app
+
+Each [release](https://github.com/SACRVM/sac-data-grid/releases) has a ZIP,
+`sac-data-grid-<version>.zip`, holding one folder, `sac-data-grid/`, with `js/`, `LICENSE` and
+`VERSION`. Vendor it the way you vendor the kit: drop the folder in verbatim, never edit it, and
+upgrade by replacing it with the next release. Load the scripts from it in the order shown under
+Quick start. The app supplies the kit itself (kit >= 2.22.0).
+
 ## Develop
 
 - `npx serve .` and open `index.html`: the demo is the manual test bed. It has a 100k-row array
