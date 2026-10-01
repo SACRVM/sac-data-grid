@@ -89,7 +89,9 @@
     };
 
     /** Phones: a tap on the cell that was already active opens the record. */
+    const prevCellClick = P._onCellClick;
     P._onCellClick = function (r, c, wasActive) {
+        if (prevCellClick) prevCellClick.call(this, r, c, wasActive);
         if (wasActive && this._compact() && !this._editor) this._openRecord(r);
     };
 

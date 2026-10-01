@@ -145,6 +145,12 @@
         return { dirty: has(e.fields, col.field), error: e.errors[col.field] || null };
     };
 
+    /** Any error on the row, in any column (hidden ones too). */
+    P._rowHasError = function (row) {
+        const e = this._entryOf(row);
+        return !!(e && Object.keys(e.errors).length);
+    };
+
     P._isDeleted = function (row) {
         const e = this._entryOf(row);
         return !!(e && e.op === "delete");
@@ -182,9 +188,9 @@
             const s = c === first ? t("data-grid.new-row", "New row") : "";
             if (cell._text !== s) { cell.textContent = s; cell._text = s; }
             cell.classList.remove("dirty", "invalid", "ro");
-            cell.removeAttribute("title");
-            cell.removeAttribute("aria-invalid");
+            this._cellError(cell, "");
         });
+        rowEl._rh.classList.remove("err");
     };
 
     P._onModeChanged = function () {
@@ -610,7 +616,7 @@
             const line = data[i % R];
             for (let c = c0; c <= c1; c++) {
                 const col = this._cols[c];
-                if (col.readonly) continue;
+                if (col.readonly || !col.inline) continue;
                 const j = c - c0;
                 if (!tile && j >= line.length) continue;
                 const raw = line[j % line.length] != null ? line[j % line.length] : "";
@@ -685,13 +691,23 @@
     P._onSpace = function () { return this._toggleBool(); };
 
     P._onCellPointerDown = function (e, r, c) {
-        // The box itself; on touch, anywhere in the cell (the box is no 44px target).
-        const box = (e.target.closest && e.target.closest(".bool")) || e.pointerType === "touch";
-        if (!box || e.shiftKey || e.button !== 0) return false;
+        this._boolTap = null;
+        if (e.shiftKey || e.button !== 0) return false;
         if (this._cols[c].typeName !== "bool" || !this._canEdit(r, c) || !this._rowAt(r)) return false;
+        // On touch, anywhere in the cell (the box is no 44px target), but only
+        // once the gesture turns out a tap: a scroll that starts here sends no
+        // click, and must not flip the value.
+        if (e.pointerType === "touch") { this._boolTap = { r, c }; return false; }
+        if (!(e.target.closest && e.target.closest(".bool"))) return false;
         this._setCursor(r, c, false);
         this._toggleBool();
         return true;
+    };
+
+    P._onCellClick = function (r, c) {
+        const tap = this._boolTap;
+        this._boolTap = null;
+        if (tap && tap.r === r && tap.c === c && this._canEdit(r, c)) this._toggleBool();
     };
 
     P._onCellDblClick = function (r, c) {

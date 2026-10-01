@@ -698,6 +698,91 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(res, [0, 1], "a stale error does not hold back a save");
     });
 
+    test("paste skips columns with inline: false", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.grid.columns = fx.grid.columns.map((c) => c.field === 'w1' ? { ...c, inline: false } : c)");
+        await p.frames(2);
+        const before = await p.eval("fx.cell(0, 11)");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.eval(`fx.pasteText("pasted")`);
+        await settle(p);
+        eq([await p.eval("fx.cell(0, 11)"), await p.eval("fx.grid.dirty")], [before, 0], "the form-only column is untouched");
+    });
+
+    test("touch: a bool cell flips on a tap, not when a scroll starts on it", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        const val = () => p.eval("fx.grid._get(fx.grid._rowAt(0), fx.grid._cols[6])");
+        const start = await val();
+        const touch = (type) => p.eval(`(() => { const type = ${JSON.stringify(type)}, c = fx.cellEl(0, 6), r = c.getBoundingClientRect();
+            const o = { pointerType: "touch", pointerId: 7, isPrimary: true, button: 0, bubbles: true, composed: true, clientX: r.x + 8, clientY: r.y + 8 };
+            c.dispatchEvent(type === "click" ? new MouseEvent("click", o) : new PointerEvent(type, o)); })()`);
+        await touch("pointerdown");
+        await touch("pointercancel");             // the browser took the gesture for a scroll
+        await p.frames(2);
+        eq(await val(), start, "a scroll leaves it alone");
+        await touch("pointerdown");
+        await touch("pointerup");
+        await touch("click");
+        await p.frames(2);
+        eq(await val(), !start, "a tap flips it");
+    });
+
+    test("the new line drops a pooled row's error marks", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const res = await p.eval(`(() => { const row = fx.cellEl(0, 1).closest(".row");
+            fx.grid._cellError(row._cells[1], "Required");
+            row._rh.classList.add("err");
+            fx.grid._fillNewLine(row);
+            return [row._cells[1]._err, row._cells[1].getAttribute("aria-description"), row._rh.classList.contains("err")]; })()`);
+        eq(res, ["", null, false]);
+    });
+
+    test("a long press on a header leaves the next tap alone", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval(`(() => { const h = fx.header(2), r = h.getBoundingClientRect();
+            h.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", pointerId: 9, isPrimary: true, button: 0,
+                bubbles: true, composed: true, clientX: r.x + 10, clientY: r.y + 10 })); })()`);
+        await p.eval("new Promise((r) => setTimeout(r, 600))");
+        ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "the long press opened the menu");
+        await p.key("Escape");
+        await p.eval("new Promise((r) => setTimeout(r, 1100))");
+        const h = await center(p, "fx.header(2)");
+        await p.click(h.x, h.y);
+        await settle(p);
+        eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "asc" }], "the next tap sorts");
+    });
+
+    test("the row header's error dot counts hidden columns", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.grid.view = { columns: { w1: { hidden: true } } }");
+        await p.frames(2);
+        await p.eval(`fx.grid._entryFor(fx.grid._rowAt(0)).errors.w1 = "Server says no"; fx.grid._stamp++; fx.grid._scheduleRender()`);
+        await p.frames(2);
+        ok(await p.eval("fx.cellEl(0, 1).closest('.row')._rh.classList.contains('err')"), "marked");
+    });
+
+    test("switching row-header re-checks how many columns stay frozen", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.grid.setAttribute('row-header', 'none'); fx.grid.style.width = '420px'");
+        await p.eval("new Promise((r) => setTimeout(r, 200))");
+        await p.frames(2);
+        eq(await p.eval("fx.grid._nf"), 2, "none: both frozen columns fit");
+        await p.eval("fx.grid.setAttribute('row-header', 'numbers')");
+        await p.frames(2);
+        eq(await p.eval("fx.grid._nf"), 1, "numbers: the wider header leaves room for one");
+    });
+
+    test("fit width leaves no room for a header button", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.grid.columns = fx.grid.columns.map((c) => c.field === 'n' ? { ...c, label: 'A rather long header label' } : c)");
+        await p.frames(2);
+        await p.eval("fx.grid._fitColumn(2)");
+        await p.frames(2);
+        const [sw, cw, w] = await p.eval("[fx.header(2)._lbl.scrollWidth, fx.header(2)._lbl.clientWidth, fx.grid.view.columns.n.width]");
+        ok(sw <= cw, `the title fits (${sw} of ${cw})`);
+        ok(w - sw <= 22, `no spare room: column ${w}, title ${sw}`);
+    });
+
     test("save errors from the source keep cells dirty and marked", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-error=1");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");

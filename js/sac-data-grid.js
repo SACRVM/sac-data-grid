@@ -747,6 +747,8 @@ class SacDataGrid extends HTMLElement {
                 break;
             case "row-header":
                 this._layout();
+                // Its width counts towards the frozen columns' 60 %.
+                if (this._cols.length && this._frozenCount() !== this._nf) this._visible();
                 this._stamp++;
                 this._scheduleRender();
                 break;
@@ -1613,7 +1615,7 @@ class SacDataGrid extends HTMLElement {
             this._cellError(cell, (state && state.error) || "");
             if (state && state.error) invalid = true;
         }
-        row._rh.classList.toggle("err", invalid);
+        row._rh.classList.toggle("err", this._rowHasError ? this._rowHasError(data) : invalid);
         if (this._paintRowState) this._paintRowState(row, data);
     }
 
@@ -2340,6 +2342,7 @@ class SacDataGrid extends HTMLElement {
 
     _onHeadClick(e) {
         if (this._suppressClick) { this._suppressClick = false; return; }
+        if (performance.now() - this._headPressAt < 1000) return;      // ends a long press
         if (e.target.closest(".corner")) {
             this._scroller.focus({ preventScroll: true });
             this._selectAll();
@@ -2354,8 +2357,10 @@ class SacDataGrid extends HTMLElement {
         const h = this._hcellOf(e.target);
         if (!h) return;
         e.preventDefault();
+        const touch = !!this._headPress;
         this._cancelHeadPress();
         if (performance.now() - this._headPressAt < 1000) return;   // the long press opened it
+        if (touch) this._headPressAt = performance.now();           // the click after it is no tap
         this._openColumnMenu(h._c, { clientX: e.clientX, clientY: e.clientY });
     }
 
@@ -2369,7 +2374,6 @@ class SacDataGrid extends HTMLElement {
             timer: setTimeout(() => {
                 this._cancelHeadPress();
                 this._headPressAt = performance.now();
-                this._suppressClick = true;
                 this._openColumnMenu(h._c, { clientX: x, clientY: y });
             }, 500),
             move: (ev) => { if (Math.hypot(ev.clientX - x, ev.clientY - y) > 10) this._cancelHeadPress(); },
@@ -2493,7 +2497,8 @@ class SacDataGrid extends HTMLElement {
         const hs = getComputedStyle(h);
         ctx.font = `${hs.fontWeight} ${hs.fontSize} ${hs.fontFamily}`;
         const label = col.labelText().toUpperCase();
-        const head = ctx.measureText(label).width + label.length * 0.08 * parseFloat(hs.fontSize) + 34;
+        const head = ctx.measureText(label).width + label.length * 0.08 * parseFloat(hs.fontSize)
+            + parseFloat(hs.paddingLeft) + parseFloat(hs.paddingRight) + 2;
         const extra = col.typeName === "tags" ? 40 : col.typeName === "color" ? 24 : 0;
         this._widths[col.field] = Math.max(col.minWidth, Math.min(800, Math.ceil(Math.max(max + 18 + extra, head))));
         this._layout();
