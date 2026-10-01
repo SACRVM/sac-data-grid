@@ -861,6 +861,18 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("[fx.cell(0, 11), fx.cell(19, 11)]"), ["v", "v"], "pasted down to the last row");
     });
 
+    test("datetime editor: the date is not cut short by its calendar button", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'dt')");
+        await p.key("Enter");
+        await p.frames(3);
+        const fit = await p.eval(`(() => {
+            const [date, time] = fx.grid._editor.el.children;
+            const input = date.shadowRoot.querySelector("input"), field = time.shadowRoot.querySelector(".field");
+            return [input.scrollWidth <= input.clientWidth, field.scrollWidth <= time.getBoundingClientRect().width + 0.5]; })()`);
+        eq(fit, [true, true], "date and time both show in full");
+    });
+
     test("save errors from the source keep cells dirty and marked", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-error=1");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");

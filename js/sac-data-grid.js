@@ -366,8 +366,11 @@
             outline: none;
         }
         .cell.ar .cell-input { text-align: right; }
+        /* The time field takes what it needs, the date (with its calendar
+           button) the rest: an even split cut the date short. */
         .dt-editor { display: flex; height: 100%; }
         .dt-editor > * { flex: 1 1 0; min-width: 0; }
+        .dt-editor > sac-time-field { flex: 0 0 auto; width: max-content; }
         .long-pop {
             position: fixed;
             inset: auto;
