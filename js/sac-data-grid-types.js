@@ -149,15 +149,16 @@
     function parseDateTime(text) {
         const s = String(text == null ? "" : text).trim();
         if (s === "") return "";
-        const date = parseDate(s);
-        if (date) return `${date}T00:00`;
+        // Date and time first: sac.regional.parseDate (kit ≥ 2.22.2) also takes
+        // "date time" and drops the time, which a datetime must keep.
         const split = /T|\s+/g;
         for (let m; (m = split.exec(s));) {
             const d = parseDate(s.slice(0, m.index));
             const tm = d && parseTime(s.slice(m.index + m[0].length));
             if (tm) return `${d}T${tm}`;
         }
-        return null;
+        const date = parseDate(s);
+        return date ? `${date}T00:00` : null;
     }
 
     /* ---------------------------------------------------------- numbers -- */

@@ -975,8 +975,8 @@ class SacLauncher extends HTMLElement {
 
     _showDialog() {
         // Our keydown listener must register BEFORE the dialog's own (both
-        // capture on document; same node fires in registration order) so we
-        // can extend its focus trap across the form inputs.
+        // capture on document; same node fires in registration order) so
+        // Enter in a field submits before anything else sees it.
         document.addEventListener("keydown", this._onDialogKeydown, true);
         this._dialog.open();
         const firstBad = this._formEl.querySelector('[aria-invalid="true"]');
@@ -1064,24 +1064,7 @@ class SacLauncher extends HTMLElement {
             dlg.close("add");
             return;
         }
-        if (e.key !== "Tab") return;
-
-        // Extend the dialog's focus trap (it only knows its own shadow
-        // buttons) to a ring of: form inputs → dialog buttons → form inputs.
-        const inputs = Array.from(this._formEl.querySelectorAll("input"));
-        const btns = dlg.shadowRoot
-            ? Array.from(dlg.shadowRoot.querySelectorAll(".btn"))
-            : [];
-        const ring = inputs.concat(btns);
-        if (ring.length === 0) return;
-        let idx = ring.indexOf(active);
-        if (idx < 0 && dlg.shadowRoot) idx = ring.indexOf(dlg.shadowRoot.activeElement);
-        e.preventDefault();
-        e.stopImmediatePropagation(); // the dialog's own trap must not also fire
-        let next;
-        if (e.shiftKey) next = ring[(idx <= 0 ? ring.length : idx) - 1];
-        else next = ring[(idx + 1) % ring.length];
-        next.focus();
+        // Tab: the dialog's own trap covers the form (it walks its body).
     }
 
     _onDialogAction(action) {

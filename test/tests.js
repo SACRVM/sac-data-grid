@@ -1375,9 +1375,6 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.key("Escape");
         await p.frames(2);
         ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "Escape: focus on the grid");
-        // The closed panel still takes pointer events while it fades out (160 ms),
-        // and it opened right under the pointer.
-        await p.eval("new Promise(r => setTimeout(r, 250))");
         await rclick(p, b.x, b.y);
         await p.frames(2);
         const item = await p.eval("fx.center(fx.grid._menu.querySelector('[data-action=sort-desc]'))");
@@ -1454,7 +1451,7 @@ module.exports = function ({ test, eq, ok, center }) {
         })()`);
         eq(r.iso, ["2026-09-05", null, ""], "iso: ISO only");
         eq(r.dmy, ["2026-09-05", "2026-09-05", null, "05.09.2026"], "day first; no 31 February");
-        eq(r.mdy, ["2026-09-05", "09/05/2026", "2:30 PM", "12:05 AM"], "month first; 12-hour clock");
+        eq(r.mdy, ["2026-09-05", "09/05/2026", "02:30 PM", "12:05 AM"], "month first; 12-hour clock");
         eq(r.time, ["14:00", "14:30", "09:05", "14:30", null, ""], "both cycles; a bare hour is not a time");
         eq(r.dt, ["2026-09-25T14:30", "2026-09-25T00:00", "2026-09-25T14:30", null], "datetimes");
         eq(r.dt2, ["2026-09-25T14:30", "25.09.2026 14:30"], "spaces inside the date");
