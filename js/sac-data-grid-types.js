@@ -383,6 +383,8 @@
         },
     });
 
+    // editSample: a value as wide as the type gets, so an editor opened on an
+    // empty (or short) value still has room for what will be typed.
     define("date", {
         width: 130,
         filter: "date",
@@ -390,6 +392,8 @@
         parse(text) { const v = parseDate(text); return v == null ? undefined : v; },
         editor(col) {
             return kitField("sac-date-field", col, { min: col.min && normDate(col.min), max: col.max && normDate(col.max) });
+        },
+        editSample() { return "2026-12-28";
         },
     });
 
@@ -401,6 +405,8 @@
         editor(col) {
             return kitField("sac-time-field", col, { step: col.step, min: col.min && normTime(col.min), max: col.max && normTime(col.max) });
         },
+        editSample() { return "12:58";
+        },
     });
 
     define("datetime", {
@@ -409,6 +415,7 @@
         text(v) { return formatDateTime(v); },
         parse(text) { const v = parseDateTime(text); return v == null ? undefined : v; },
         editor: dateTimeEditor,
+        editSample() { return "2026-12-28T12:58"; },
     });
 
     define("bool", {
@@ -456,6 +463,12 @@
             const el = kitField("sac-select", col, {});
             if (el) el.options = (col.options || []).map((o) => ({ value: String(o.value), label: optionLabel(o) }));
             return el;
+        },
+        // The option with the longest label: picking it must not cut it short.
+        editSample(col) {
+            let best = null;
+            for (const o of col.options || []) if (!best || optionLabel(o).length > optionLabel(best).length) best = o;
+            return best ? String(best.value) : null;
         },
         // sac-select speaks strings; hand back the option's own value.
         fromEditor(v, col) {

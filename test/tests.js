@@ -886,6 +886,101 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(fit, [true, true], "date and time both show in full");
     });
 
+    /* A lifted editor: geometry of the editor (ed.pop) against its cell. */
+    const lifted = (p) => p.eval(`(() => { const ed = fx.grid._editor; if (!ed) return null;
+        const c = ed.cell.getBoundingClientRect(), r = ed.pop && ed.pop.getBoundingClientRect();
+        const input = ed.el.shadowRoot && ed.el.shadowRoot.querySelector("input");
+        return { lifted: !!ed.pop, cell: [Math.round(c.left), Math.round(c.right), Math.round(c.top)],
+            pop: r ? [Math.round(r.left), Math.round(r.right), Math.round(r.top)] : null,
+            fits: input ? input.scrollWidth <= input.clientWidth : null,
+            clip: ed.pop ? ed.pop.style.clipPath : "", hidden: ed.pop ? ed.pop.style.opacity === "0" : false }; })()`);
+
+    test("lifted editor: a narrow date column edits over its neighbour", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'd')");
+        await p.key("Enter");
+        await p.frames(3);
+        eq((await lifted(p)).lifted, false, "a wide enough column edits in place");
+        await p.key("Escape");
+        await p.eval("fx.grid.view = { columns: { d: { width: 80 } } }");
+        await p.frames(2);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'd')");
+        await p.key("Enter");
+        await p.frames(3);
+        const g = await lifted(p);
+        ok(g.lifted && g.pop[1] - g.pop[0] > g.cell[1] - g.cell[0], "lifted, wider than the cell");
+        eq([g.pop[0], g.pop[2], g.fits], [g.cell[0], g.cell[2], true], "anchored at the cell, the date in full");
+        eq(await p.eval("fx.grid.view.columns.d.width"), 80, "the column keeps its width");
+        await p.key("Escape");
+        await p.frames(2);
+        eq(await p.eval("[!!fx.grid._editor, fx.grid.shadowRoot.querySelectorAll('.lift-pop').length]"), [false, 0], "gone with the editor");
+    });
+
+    test("lifted editor: an empty cell has room for a full date", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.grid.view = { columns: { d: { width: 80 } } }");
+        await p.frames(2);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'd')");
+        await p.key("Delete");
+        await p.key("Enter");
+        await p.frames(3);
+        ok((await lifted(p)).lifted, "lifted although empty");
+    });
+
+    test("lifted editor: a right-aligned column grows to the left", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.grid.columns = fx.grid.columns.map((c) => c.field === 'd' ? { ...c, align: 'right', width: 80 } : c)");
+        await p.frames(2);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'd')");
+        await p.key("Enter");
+        await p.frames(3);
+        const g = await lifted(p);
+        eq([g.lifted, g.pop[1]], [true, g.cell[1]], "its right edge stays on the cell's");
+        ok(g.pop[0] < g.cell[0], "and it grows left");
+    });
+
+    test("lifted editor: follows its cell while scrolling, hidden under the header", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.grid.view = { columns: { d: { width: 80 } } }");
+        await p.frames(2);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(4, 'd')");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.eval("fx.grid._scroller.scrollTop = 40");
+        await p.frames(3);
+        const g = await lifted(p);
+        eq(g.pop[2], g.cell[2], "moved with the cell");
+        await p.eval("fx.grid._scroller.scrollTop = 110");      // the cell now half under the header
+        await p.frames(3);
+        const h = await lifted(p);
+        eq(h.pop[2], h.cell[2], "still on its cell");
+        ok(/^inset\([1-9]\d*px 0px 0px( 0px)?\)$/.test(h.clip), `clipped under the header (${h.clip})`);
+        await p.eval("fx.grid._scroller.scrollTop = 400");
+        await p.frames(3);
+        const gone = await lifted(p);
+        ok(gone && gone.hidden, "hidden once its cell is out of view");
+        ok(await p.eval("fx.grid._editorHasFocus()"), "the field keeps the focus");
+    });
+
+    test("lifted editor: a select has room for its longest option, and its list works", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        await p.eval("fx.grid.columns = fx.grid.columns.map((c) => c.field === 's' ? { ...c, width: 60 } : c)");
+        await p.frames(2);
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 's')");
+        await p.key("Enter");
+        await p.frames(3);
+        ok((await lifted(p)).lifted, "lifted");
+        await p.key("ArrowDown", ["Alt"]);
+        await p.frames(3);
+        ok(await p.eval("fx.grid._editor.el.open"), "the list is open");
+        await p.key("End");
+        await p.key("Enter");
+        await p.frames(3);
+        await p.key("Enter");
+        await settle(p);
+        eq(await p.eval("fx.grid._get(fx.grid._rowAt(1), fx.grid._cols[7])"), "c", "picked the last option");
+    });
+
     test("save errors from the source keep cells dirty and marked", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-error=1");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");

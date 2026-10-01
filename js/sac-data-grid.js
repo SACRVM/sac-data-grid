@@ -374,6 +374,19 @@
         .dt-editor { display: flex; height: 100%; }
         .dt-editor > * { flex: 1 1 0; min-width: 0; }
         .dt-editor > sac-time-field { flex: 0 0 auto; width: max-content; }
+        /* A lifted editor: the editing cell, only wider (over its neighbours). */
+        .lift-pop {
+            position: fixed;
+            inset: auto;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: var(--grid-bg);
+            box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-1);
+            color: var(--text);
+            overflow: visible;
+            font: inherit;
+        }
         .long-pop {
             position: fixed;
             inset: auto;

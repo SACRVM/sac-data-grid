@@ -123,6 +123,10 @@ The grid fills the height you give it (default 420px).
 | `color` | `"#rrggbb"` | swatch + hex | `<sac-color-field>` |
 | `readonly` | anything | `format(value, row)` | none |
 
+A column only needs to be as wide as its values. When an editor does not fit its cell (a date with
+its calendar button, a select's longest option, tags with their ×), it opens over the cell, as wide as
+it needs, covering the neighbours (to the left in a right-aligned column). The column keeps its width.
+
 ### Custom types
 
 ```js

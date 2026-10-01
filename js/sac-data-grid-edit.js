@@ -337,7 +337,10 @@
         cell.classList.add("editing");
         cell.textContent = "";
         cell._text = null;
-        if (kind === "long") {
+        if (kind === "kit") {
+            cell.appendChild(el);
+            this._liftEditor(ed);
+        } else if (kind === "long") {
             const pop = document.createElement("div");
             pop.className = "long-pop";
             pop.setAttribute("popover", "manual");
@@ -380,10 +383,114 @@
         return true;
     };
 
+    /** How much wider an editor's content wants to be than it is: the most
+     *  any input or clipping box inside it (kit shadow roots included) is
+     *  cut short by. */
+    function shortfall(el) {
+        let d = 0;
+        const walk = (root) => {
+            for (const n of root.querySelectorAll("*")) {
+                if (n.shadowRoot) walk(n.shadowRoot);
+                if (n.tagName === "INPUT" || /auto|scroll|hidden/.test(getComputedStyle(n).overflowX)) {
+                    d = Math.max(d, n.scrollWidth - n.clientWidth);
+                }
+            }
+        };
+        if (el.shadowRoot) walk(el.shadowRoot);
+        walk(el);
+        return d;
+    }
+
+    /**
+     * A kit editor that does not fit its cell (a date and its calendar
+     * button in a column sized for the date) is lifted: shown over the cell,
+     * as wide as it needs, growing over the neighbours in the reading
+     * direction (leftwards in a right-aligned column). The column keeps its
+     * width; the editor follows the cell while the grid scrolls.
+     */
+    P._liftEditor = function (ed) {
+        const { el, col, cell } = ed;
+        const cellW = cell.getBoundingClientRect().width;
+        let need = shortfall(el);
+        const sample = col.type.editSample ? col.type.editSample(col) : null;
+        if (sample != null) {
+            // Measured with a full value too: typing into an empty cell needs the room.
+            let cur;
+            try { cur = el.value; } catch (err) { cur = undefined; }
+            try {
+                el.value = col.type.toEditor ? col.type.toEditor(sample, col) : sample;
+                need = Math.max(need, shortfall(el));
+            } catch (err) { /* keeps the measure of the value itself */ }
+            try { el.value = cur; } catch (err) { /* read-only value */ }
+        }
+        if (need <= 0.5) return;
+        const max = Math.max(cellW, Math.min(480, innerWidth - 16));
+        const pop = document.createElement("div");
+        pop.className = "lift-pop";
+        pop.setAttribute("popover", "manual");
+        cell.appendChild(pop);
+        pop.appendChild(el);
+        try { pop.showPopover(); } catch (err) { /* not in the document */ }
+        ed.pop = pop;
+        ed.liftW = Math.min(max, Math.ceil(cellW + need + 2));
+        this._placeLift();
+        // A compound editor shares the room anew once wider: measure again.
+        for (let i = 0; i < 2 && ed.liftW < max; i++) {
+            const more = shortfall(el);
+            if (more <= 0.5) break;
+            ed.liftW = Math.min(max, Math.ceil(ed.liftW + more + 2));
+            this._placeLift();
+        }
+        ed.onMove = () => this._placeLift();
+        this._scroller.addEventListener("scroll", ed.onMove);
+        window.addEventListener("scroll", ed.onMove, true);
+        window.addEventListener("resize", ed.onMove);
+    };
+
+    /** Put the lifted editor over its cell; clip it to the scrolling area
+     *  (under the header, the footer and the frozen columns it is hidden). */
+    P._placeLift = function () {
+        const ed = this._editor;
+        if (!ed || !ed.liftW || !ed.pop) return;
+        const pop = ed.pop, r = ed.cell.getBoundingClientRect(), w = ed.liftW;
+        const sr = this._scroller.getBoundingClientRect();
+        const frozen = ed.c < this._nf;
+        const vis = {
+            left: sr.left + (frozen ? this._rhW : this._frozenW),
+            top: sr.top + this._headH,
+            right: sr.left + this._scroller.clientWidth,
+            bottom: sr.top + this._scroller.clientHeight - this._footH,
+        };
+        let left = ed.col.align === "right" ? r.right - w : r.left;
+        if (left + w > innerWidth - 8) left = r.right - w;          // no room on the right: grow left
+        if (left < 8) left = r.left;                                 // nor on the left: grow right
+        pop.style.width = w + "px";
+        pop.style.height = r.height + "px";
+        pop.style.left = left + "px";
+        pop.style.top = r.top + "px";
+        const cut = [
+            Math.max(0, vis.top - r.top),
+            Math.max(0, left + w - Math.max(vis.right, r.right)),
+            Math.max(0, r.bottom - vis.bottom),
+            Math.max(0, vis.left - left),
+        ];
+        pop.style.clipPath = cut.some((x) => x > 0) ? `inset(${cut.map((x) => x + "px").join(" ")})` : "";
+        // Out of view: invisible, but not visibility: hidden, which would
+        // take the focus from the field (and commit the edit).
+        const gone = cut[0] + cut[2] >= r.height || cut[1] + cut[3] >= w;
+        pop.style.opacity = gone ? "0" : "";
+        pop.style.pointerEvents = gone ? "none" : "";
+    };
+
     P._closeEditor = function () {
         const ed = this._editor;
         if (!ed) return;
         this._editor = null;
+        if (ed.onMove) {
+            this._scroller.removeEventListener("scroll", ed.onMove);
+            window.removeEventListener("scroll", ed.onMove, true);
+            window.removeEventListener("resize", ed.onMove);
+        }
         if (ed.pop) { try { ed.pop.hidePopover(); } catch (err) { /* closed */ } ed.pop.remove(); }
         if (ed.el.isConnected) ed.el.remove();
         ed.cell.classList.remove("editing");

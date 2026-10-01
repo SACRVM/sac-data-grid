@@ -143,6 +143,15 @@ changed — persist it if you like), `sac:load-error`.
 
 Custom types: `{ render(value, row), editor(cell) → HTMLElement, parse, format }`.
 
+**Editor wider than its cell.** A column is as wide as its values need, not
+its editor. When a kit editor does not fit its cell (a date and its calendar
+button, a select's longest option and its arrow, tags with their ×), it is
+lifted over the cell, as wide as it needs, covering the neighbours in the
+reading direction (leftwards in a right-aligned column, or away from the
+viewport edge). It looks like the editing cell, only wider; the column keeps
+its width. It follows its cell while the grid scrolls and is clipped under the
+header, footer and frozen columns. An editor that fits stays in its cell.
+
 ## 6. What the grid relies on from the kit (provided by kit 2.21.0)
 
 **Kit 2.21.0 is released:** https://github.com/SACRVM/sacrvm-appkit/releases/tag/v2.21.0
