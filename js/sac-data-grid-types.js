@@ -491,15 +491,27 @@
         },
         render(cell, v, col) {
             const list = Array.isArray(v) ? v : [];
-            cell.textContent = "";
-            // The kit's chip, the one the chip editor shows: view and edit look alike.
-            for (const name of list) {
-                const o = findOption(col, name);
-                const chip = document.createElement("sac-chip");
-                chip.setAttribute("color", slot(o && o.color));
-                chip.setAttribute("label", o ? optionLabel(o) : String(name));
-                cell.appendChild(chip);
+            const labels = list.map((name) => { const o = findOption(col, name); return [o ? optionLabel(o) : String(name), slot(o && o.color)]; });
+            if (!customElements.get("sac-chip")) {
+                if (!warned.has("sac-chip")) {
+                    warned.add("sac-chip");
+                    console.warn("[sac-data-grid] <sac-chip> is not loaded: tags cells show plain text. "
+                        + "Load kit/js/components/sac-chip.js (SACRVM APPKIT ≥ 2.22.0).");
+                }
+                cell.textContent = labels.map((l) => l[0]).join(", ");
+                return;
             }
+            // The kit's chip, the one the chip editor shows: view and edit look
+            // alike. The chips a (pooled) cell already holds are reused: a new
+            // one sets up a shadow root, which scrolling should not pay for.
+            for (const n of [...cell.childNodes]) if (n.nodeName !== "SAC-CHIP") n.remove();
+            labels.forEach(([label, color], i) => {
+                let chip = cell.children[i];
+                if (!chip) { chip = document.createElement("sac-chip"); cell.appendChild(chip); }
+                if (chip.getAttribute("color") !== color) chip.setAttribute("color", color);
+                if (chip.getAttribute("label") !== label) chip.setAttribute("label", label);
+            });
+            while (cell.children.length > labels.length) cell.lastElementChild.remove();
         },
         editor(col) {
             const el = kitField("sac-chip-input", col, { "allow-create": col.allowCreate !== false });

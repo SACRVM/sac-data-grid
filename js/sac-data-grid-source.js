@@ -140,10 +140,10 @@
         }
 
         function byId() {
-            if (!index || index.version !== version) {
+            if (!index || index.layout !== layout) {
                 const map = new Map();
                 data.forEach((row, i) => map.set(row[key], i));
-                index = { version, map };
+                index = { layout, map };
             }
             return index.map;
         }
@@ -160,13 +160,17 @@
             return `new-${++seq}`;
         }
 
+        // version: any change (sorted / filtered views go stale);
+        // layout: rows added or removed (the id → position index goes stale).
+        let layout = 0;
         const touch = () => { version++; };
+        const moved = () => { version++; layout++; };
 
         return {
             key,
             pageSize: o.pageSize > 0 ? o.pageSize : 5000,
             get rows() { return data; },
-            setRows(next) { data = Array.isArray(next) ? next : []; touch(); },
+            setRows(next) { data = Array.isArray(next) ? next : []; moved(); },
 
             load(q) {
                 const { offset = 0, limit = 100, sort, filter, aggregate, signal } = q || {};
@@ -183,13 +187,13 @@
                     const map = byId();
                     if (ch.op === "delete") {
                         const i = map.get(ch.id);
-                        if (i != null) { data.splice(i, 1); touch(); }
+                        if (i != null) { data.splice(i, 1); moved(); }
                         saved.push(ch.id);
                     } else if (ch.op === "create") {
                         const row = Object.assign({}, ch.row || {}, ch.fields || {});
                         if (row[key] == null || ch.temp || map.has(row[key])) row[key] = newId(row);
                         data.push(row);
-                        touch();
+                        moved();
                         saved.push(ch.id);
                         if (ch.row && ch.row !== row) Object.assign(ch.row, row);
                     } else {
@@ -207,7 +211,7 @@
                 const r = Object.assign({}, row || {});
                 if (r[key] == null || byId().has(r[key])) r[key] = newId(r);
                 data.push(r);
-                touch();
+                moved();
                 return Promise.resolve(r);
             },
 
@@ -215,7 +219,7 @@
                 const set = new Set(ids || []);
                 let w = 0;
                 for (const row of data) if (!set.has(row[key])) data[w++] = row;   // in place: src.rows stays the live array
-                if (w !== data.length) { data.length = w; touch(); }
+                if (w !== data.length) { data.length = w; moved(); }
                 return Promise.resolve({ removed: [...set], errors: [] });
             },
         };

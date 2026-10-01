@@ -9,8 +9,9 @@
  * the app.
  *
  * Requires kit ≥ 2.22.0 (css/ui.css, lib/globals.js, and the components it
- * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog and the cell
- * editors) plus the grid's own scripts, in this order:
+ * uses: sac-icon, sac-menu, sac-spinner, sac-toast, sac-dialog, sac-tooltip,
+ * sac-chip, sac-segmented-control and the cell editors) plus the grid's own
+ * scripts, in this order:
  *   js/sac-data-grid-types.js, js/sac-data-grid.js, js/sac-data-grid-edit.js
  *   (editing; without it the grid is read-only), js/sac-data-grid-form.js (the
  *   record form), js/sac-data-grid-source.js, js/sac-data-grid.de.js
@@ -1374,10 +1375,13 @@ class SacDataGrid extends HTMLElement {
                 if (String(Math.max(1, this._base() + this._rowCount())).length !== this._rhDigits) this._layout();
                 this._scheduleRender();
             } catch (err) {
+                // The totals were asked of this load: the next one asks again.
+                // Before the checks below: _request drops an aborted block
+                // from the map first.
+                if (aggregate.length && this._aggAsked === q) this._aggAsked = -1;
                 if (q !== this._query || this._blocks.get(b) !== blk) return;
                 if (ctrl.signal.aborted || (err && err.name === "AbortError")) {
                     this._blocks.delete(b);
-                    if (aggregate.length && this._aggAsked === q) this._aggAsked = -1;
                     return;
                 }
                 blk.error = err || new Error("load failed");

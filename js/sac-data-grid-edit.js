@@ -591,7 +591,7 @@
         e.preventDefault();
         const data = Grid.parseTSV(text);
         if (!data.length) return;
-        const R = data.length, C = Math.max(1, ...data.map((line) => line.length));
+        const R = data.length, C = data.reduce((m, line) => Math.max(m, line.length), 1);
         const s = this._rect();
         const SR = s.r2 - s.r1 + 1, SC = s.c2 - s.c1 + 1;
         let rows = R, cols = C, tile = false;

@@ -783,6 +783,84 @@ module.exports = function ({ test, eq, ok, center }) {
         ok(w - sw <= 22, `no spare room: column ${w}, title ${sw}`);
     });
 
+    test("an aborted first load hands the footer totals on to the next", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval(`(() => {
+            window.__asked = [];
+            const inner = SacDataGrid.arraySource(fx.data, { key: "id", pageSize: 50 });
+            fx.grid.source = { key: "id", pageSize: 50, load(q) {
+                __asked.push(q.aggregate.length);
+                return new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => resolve(inner.load(q)), 80);
+                    q.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); });
+                });
+            } };
+        })()`);
+        await p.eval(`new Promise((r) => requestAnimationFrame(() => {
+            const g = fx.grid, blk = g._blocks.get(0);
+            blk.ctrl.abort();                 // what _request does to a block nobody looks at
+            g._blocks.delete(0);
+            r();
+        }))`);
+        await p.eval("new Promise((r) => setTimeout(r, 50))");
+        await p.eval("fx.grid._stamp++; fx.grid._scheduleRender()");
+        await settle(p);
+        const asked = await p.eval("__asked");
+        ok(asked.length >= 2 && asked[asked.length - 1] > 0, `the next load asks for the totals (${JSON.stringify(asked)})`);
+        ok(await p.eval("fx.grid._aggs != null"), "the footer has its totals");
+    });
+
+    test("tags: a repaint reuses the chips a cell holds", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const c = await p.eval("fx.grid._cols.findIndex((x) => x.typeName === 'tags')");
+        const r = await p.eval(`(() => { let r = 0; while (!(fx.grid._get(fx.grid._rowAt(r), fx.grid._cols[${c}]) || []).length) r++; return r; })()`);
+        await p.eval(`window.__chip = fx.cellEl(${r}, ${c}).querySelector("sac-chip")`);
+        await p.eval("fx.grid._stamp++; fx.grid._scheduleRender()");
+        await p.frames(2);
+        ok(await p.eval(`fx.cellEl(${r}, ${c}).querySelector("sac-chip") === __chip`), "the same chip element");
+    });
+
+    test("tags: without sac-chip the cell shows the labels as text", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const res = await p.eval(`(() => {
+            const get = customElements.get;
+            customElements.get = (n) => (n === "sac-chip" ? undefined : get.call(customElements, n));
+            try {
+                const col = fx.grid._cols.find((x) => x.typeName === "tags"), div = document.createElement("div");
+                col.type.render(div, ["x", "y"], col);
+                return div.textContent;
+            } finally { customElements.get = get; }
+        })()`);
+        eq(res, "Ex, Why");
+        await p.frames(1);
+        const warned = p.console.filter((m) => /<sac-chip> is not loaded/.test(m));
+        eq(warned.length, 1, "one console warning");
+        p.console = p.console.filter((m) => !warned.includes(m));      // expected, not a failure
+    });
+
+    test("arraySource: saving many updates does not rebuild its index per row", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const ms = await p.eval(`(async () => {
+            const rows = Array.from({ length: 100000 }, (_, i) => ({ id: i + 1, v: i }));
+            const src = SacDataGrid.arraySource(rows, { key: "id" });
+            const changes = Array.from({ length: 1000 }, (_, i) => ({ id: i * 50 + 1, op: "update", fields: { v: -1 } }));
+            const t0 = performance.now();
+            const res = await src.save(changes);
+            return [Math.round(performance.now() - t0), res.saved.length];
+        })()`);
+        eq(ms[1], 1000, "all saved");
+        ok(ms[0] < 1000, `fast enough (${ms[0]} ms)`);
+    });
+
+    test("pasting a huge block does not overflow the stack", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        await p.eval("fx.grid._newLine = () => 0");          // no rows added: only the size matters
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        await p.eval(`fx.pasteText("v\\n".repeat(200000))`);
+        await settle(p);
+        eq(await p.eval("[fx.cell(0, 11), fx.cell(19, 11)]"), ["v", "v"], "pasted down to the last row");
+    });
+
     test("save errors from the source keep cells dirty and marked", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-error=1");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w2')");
