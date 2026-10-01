@@ -293,6 +293,19 @@ module.exports = function ({ test, eq, ok, center }) {
             "the menu offers no sort or filter");
     });
 
+    test("the resize line sits on the column edge, on the grid line when shown", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        const at = () => p.eval(`(() => { const rs = fx.header(2)._rs, a = getComputedStyle(rs, "::after"), cell = fx.cellEl(0, 2);
+            return [Math.round(rs.getBoundingClientRect().right - parseFloat(a.right) - parseFloat(a.width)),
+                Math.round(cell.getBoundingClientRect().right - 1)]; })()`);
+        const quiet = await at();
+        eq(quiet[0], quiet[1], "quiet: on the column's last pixel");
+        await p.eval("fx.grid.setAttribute('lines', 'grid')");
+        await p.frames(2);
+        const grid = await at();
+        eq(grid[0], grid[1], "grid: on the grid line");
+    });
+
     test("tags show as the kit's chips, in the cell as in the editor", async (p) => {
         await p.load("/test/fixture.html?rows=20");
         const c = await p.eval("fx.grid._cols.findIndex((x) => x.typeName === 'tags')");

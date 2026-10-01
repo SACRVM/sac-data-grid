@@ -241,11 +241,13 @@
             cursor: col-resize;
             touch-action: none;
         }
+        /* On the column's edge: over the grid line (lines="grid"), else on
+           the column's last pixel, where that line would be. */
         .hcell .rs::after {
             content: "";
             position: absolute;
             top: 25%;
-            right: 3px;
+            right: 0;
             width: 1px;
             height: 50%;
             background: var(--border-strong);
@@ -254,6 +256,7 @@
         .hcell:hover .rs::after, .hcell .rs.active::after { opacity: 1; }
         .hcell .rs.active::after { background: var(--accent); top: 0; height: 100%; }
         :host([lines="grid"]) .hcell { border-right: 1px solid var(--border); }
+        :host([lines="grid"]) .hcell .rs::after { right: -1px; }
 
         /* ---- body ---- */
         .body { position: relative; }
