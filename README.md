@@ -69,8 +69,8 @@ The grid fills the height you give it (default 420px).
 | `compact-edit` | `form` (default) · `read` | Phones (the kit's compact viewport): edit through the record form, or read only. |
 | `row-header` | `marks` (default) · `numbers` · `none` | The column before the data. `marks`: narrow, only a row's state (`*` new, `+` the new line, a dot for a row with errors). `numbers`: the row's position, as in a spreadsheet. A click on it selects the row, a right-click opens the row menu. |
 
-`save-mode`, `paging`, `lines` and `compact-edit` are the open owner decisions of SPEC §7
-([#1](https://github.com/SACRVM/sac-data-grid/issues/1)); the defaults are provisional.
+The defaults of `save-mode`, `paging`, `lines` and `compact-edit` are the owner's decisions of SPEC §7
+([#1](https://github.com/SACRVM/sac-data-grid/issues/1)); the other values stay available.
 
 ## Properties and methods
 

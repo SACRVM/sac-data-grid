@@ -196,9 +196,12 @@ adds what the grid builds on since:
 If a gap in the kit shows up: open an issue on SACRVM/sacrvm-appkit instead
 of working around it inside the grid.
 
-## 7. Open — owner decides (build configurable, ask before finalizing)
+## 7. Owner decisions (Decided 2026-10-01, #1)
 
-| # | Question | Provisional default |
+All four stay configurable; the default is the owner's choice. A new open
+question is added here with a provisional default and asked in an issue.
+
+| # | Question | Default |
 |---|---|---|
 | 1 | Save mode default: per cell, per row on leaving the row (SharePoint), or batched with a Save button | `save-mode="row"`; all three supported |
 | 2 | Loading default: incremental scroll or pages with a pager in the footer | `paging="scroll"`; `paging="pages"` supported |

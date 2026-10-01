@@ -28,9 +28,10 @@ helpers and the dialog / menu fixes, see SPEC §6).
   `size="cell"`, and strings go through `sac.t()`. If the kit lacks
   something, open an issue on SACRVM/sacrvm-appkit rather than working around
   it here.
-- **Owner decides the look.** SPEC §7 lists open decisions. Build them
-  configurable, ship the provisional default, and ask in a GitHub issue before
-  treating a default as final. Never invent visible UI beyond the spec.
+- **Owner decides the look.** SPEC §7 records the owner's decisions. A new
+  open question goes there: build it configurable, ship a provisional default,
+  and ask in a GitHub issue before treating it as final. Never invent visible
+  UI beyond the spec.
 - **English** in code, comments, docs and commits.
 
 ## This repo is public
