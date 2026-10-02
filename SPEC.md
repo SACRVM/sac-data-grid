@@ -20,7 +20,8 @@ GitHub issue in this repo) before treating the default as final.
   in verbatim) and requires **kit ≥ 2.22.0** — 2.21.0 ships the cell editors
   this grid needs, 2.22.0 the date / time helpers and the dialog, menu and
   chip-input fixes it builds on (see §6). It never copies kit code.
-- Demo page `index.html`: a 100k-row array source, a paged "server" source
+- API page `index.html` (GitHub Pages, in the kit's showcase look) with a
+  live demo: a 100k-row array source, a paged "server" source
   (a fake async source with latency), every column type, frozen columns,
   footer totals, light/dark, EN/DE.
 
