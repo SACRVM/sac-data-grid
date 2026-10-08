@@ -765,6 +765,51 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "asc" }], "the next tap sorts");
     });
 
+    /* A real touch hold (CDP touch events): the kit (2.29+) turns a still
+       hold into a contextmenu, so a long press opens whatever a right-click does. */
+    const touchHold = async (p, expr, ms) => {
+        const pt = await center(p, expr);
+        await p.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: pt.x, y: pt.y, id: 1 }] });
+        await p.eval(`new Promise((r) => setTimeout(r, ${ms}))`);
+        await p.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await p.eval("new Promise((r) => setTimeout(r, 300))");
+    };
+    const countMenus = (p) => p.eval(`(() => { const g = fx.grid; window.__menus = { column: 0, row: 0 };
+        const col = g._openColumnMenu.bind(g), row = g._openRowMenu.bind(g);
+        g._openColumnMenu = (...a) => { __menus.column++; return col(...a); };
+        g._openRowMenu = (...a) => { __menus.row++; return row(...a); }; })()`);
+
+    test("touch: holding a header opens its menu once and does not sort", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await countMenus(p);
+        await touchHold(p, "fx.header(2)", 800);
+        eq(await p.eval("[__menus, fx.grid._menu.hasAttribute('open'), fx.grid.view.sort]"),
+            [{ column: 1, row: 0 }, true, []]);
+        await p.key("Escape");
+    });
+
+    test("touch: holding a cell opens the row menu for that row", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await countMenus(p);
+        await touchHold(p, "fx.cellEl(3, 2)", 800);
+        eq(await p.eval("[__menus, fx.grid._menu.hasAttribute('open'), [fx.grid._cur.r, fx.grid._cur.c], !!fx.grid._editor]"),
+            [{ column: 0, row: 1 }, true, [3, 2], false]);
+        await p.key("Escape");
+        await p.eval("new Promise((r) => setTimeout(r, 300))");
+        await touchHold(p, "fx.header(2)", 60);
+        eq(await p.eval("fx.grid.view.sort"), [{ field: "n", dir: "asc" }], "a tap afterwards still sorts");
+    });
+
+    test("touch: holding a bool cell opens the menu and leaves the value", async (p) => {
+        await p.load("/test/fixture.html?rows=20&save-mode=batch");
+        const val = () => p.eval("fx.grid._get(fx.grid._rowAt(1), fx.grid._cols[6])");
+        const start = await val();
+        await touchHold(p, "fx.cellEl(1, 6)", 800);
+        ok(await p.eval("fx.grid._menu.hasAttribute('open')"), "the row menu");
+        await p.key("Escape");
+        eq([await val(), await p.eval("fx.grid.dirty")], [start, 0], "not flipped");
+    });
+
     test("the row header's error dot counts hidden columns", async (p) => {
         await p.load("/test/fixture.html?rows=20&save-mode=batch");
         await p.eval("fx.grid.view = { columns: { w1: { hidden: true } } }");

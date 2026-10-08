@@ -56,7 +56,7 @@ if (saved) grid.view = saved;`)}
             ["lines", "<code>quiet</code> (default) · <code>grid</code>: row lines only, or cell grid lines."],
             ["mode-toggle", "Presence: a Read · Sheet · Form switch in the footer."],
             ["compact-edit", "<code>form</code> (default) · <code>read</code>: on phones, edit through the record form, or read only."],
-            ["row-header", "<code>marks</code> (default) · <code>numbers</code> · <code>none</code>: the column before the data. <code>marks</code> is narrow and shows only a row's state (<code>*</code> new, <code>+</code> the new line, a dot for a row with errors); <code>numbers</code> the row's position. A click selects the row, a right-click opens the row menu."],
+            ["row-header", "<code>marks</code> (default) · <code>numbers</code> · <code>none</code>: the column before the data. <code>marks</code> is narrow and shows only a row's state (<code>*</code> new, <code>+</code> the new line, a dot for a row with errors); <code>numbers</code> the row's position. A click selects the row; a right-click (a long press on touch) opens the row menu."],
         ])}
 
         <h2 id="properties">Properties and methods</h2>
@@ -197,7 +197,7 @@ if (saved) grid.view = saved;`)}
         <h2 id="edit-modes">Edit modes</h2>
         ${table("Mode", [
             ["read", "Selection, copy, sort and filter; no editing affordances. Enter opens the record read-only."],
-            ["sheet", "Inline editing with the kit's cell editors, range operations, the \"new row\" line at the end, and the row menu (right-click, Shift+F10) with Open record, New row and Delete."],
+            ["sheet", "Inline editing with the kit's cell editors, range operations, the \"new row\" line at the end, and the row menu (right-click, a long press on touch, Shift+F10) with Open record, New row and Delete."],
             ["form", "The list stays read-only; Enter, a double-click or Open record edits a row in a <code>&lt;sac-dialog&gt;</code>: every column with its label, validation, Save / Cancel, Previous / Next, New. The form commits one record (one <code>changes</code> entry). Escape with unsaved changes asks first."],
         ])}
         ${compact("no inline editing in the kit's compact viewport. The record form, a bottom sheet, is the way to edit (Enter, or a tap on the active cell); <code>compact-edit=\"read\"</code> makes the grid read-only there instead. Touch targets are 44 px under a coarse pointer.")}
