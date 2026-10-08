@@ -801,6 +801,14 @@ a.nav-icon-btn { text-decoration: none; }
     color: var(--text-muted);
 }
 
+/* sac.selection — rows of a list that marks several (kit/js/lib/selection.js).
+   No text selection or touch callout (Shift+click and a long-press would
+   start one); a marked row is the --accent-tint ground, its swapped icon
+   the accent. */
+[data-sac-row] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+[data-sac-row].marked { background: var(--accent-tint); }
+[data-sac-row].marked [data-sac-mark-icon] { color: var(--accent); }
+
 /* About window content — rendered by sac.about.open() into a <sac-window>.
    The one shared credits/licence surface: a host and an app both use it, so
    the two look related by construction. Reuses .sac-caption for the version
@@ -1253,6 +1261,26 @@ a.nav-icon-btn { text-decoration: none; }
 .tile:hover > sac-icon {
     transform: scale(1.1) rotate(5deg);
 }
+/* Arranging tiles (sac.tiles.sortable). The grid carries
+   data-sortable-active for the length of a drag: the cursor is a grabbing
+   hand everywhere in it, and the tiles the lifted one passes over stay
+   still — no hover lift, ring or glow. The lifted tile itself is on top
+   with a strong shadow and the accent ring; its position and 1.03 scale
+   are the helper's inline transform. */
+[data-sortable-active],
+[data-sortable-active] * { cursor: grabbing !important; }
+[data-sortable-active] .tile:not([data-sortable-dragging]):hover {
+    transform: translateZ(0);
+    border-color: var(--border-strong);
+    box-shadow: none;
+    background: var(--tile);
+}
+[data-sortable-active] .tile:hover > sac-icon { transform: none; }
+.tile[data-sortable-dragging] {
+    border-color: var(--accent);
+    background: var(--tile-hover);
+    box-shadow: var(--shadow-2), 0 24px 48px color-mix(in srgb, var(--sink) 40%, transparent);
+}
 
 /* Variants — footprints: .wide 2 columns × 1 row, .large 2 × 2. */
 .tile.wide  { grid-column: span 2; }
@@ -1262,23 +1290,24 @@ a.nav-icon-btn { text-decoration: none; }
     .grid > .tile.wide,
     .grid > .tile.large { grid-column: auto; grid-row: auto; --grid-rows: 1; }
 }
-/* .small — a quarter of a medium: up to four go in a .tile-pack, which
-   takes one medium cell and splits it 2×2 with the grid's own gap, so the
-   block lines up edge to edge with its neighbours. Icon only: the h2 stays
-   as the accessible name (visually hidden) — give the tile a title for the
-   tooltip. Small tiles stay small on phones; a one-column grid lays the
-   pack out as one row of four. */
+/* .small — a ninth of a medium: up to nine go in a .tile-pack, which
+   takes one medium cell and splits it 3×3 with the grid's own gap, so the
+   block lines up edge to edge with its neighbours and the rhythm of the
+   grid runs through it. Icon only: the h2 stays as the accessible name
+   (visually hidden) — give the tile a title for the tooltip. Small tiles
+   stay small on phones; a one-column grid lays the pack out as a wrapping
+   row of ~72px squares. */
 .tile-pack {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
     gap: var(--grid-gap);
     min-width: 0;
 }
 .grid > .tile-pack { min-height: 0; }
 @container (width < 581px) {
     .grid > .tile-pack {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
         grid-template-rows: auto;
         align-self: start;
     }
@@ -1288,9 +1317,11 @@ a.nav-icon-btn { text-decoration: none; }
     padding: 0;
     align-items: center;
     justify-content: center;
+    /* ~90px: the large radius would read as a pill. */
+    border-radius: var(--radius-m);
 }
 .tile.small > sac-icon {
-    --icon-size: 40px;
+    --icon-size: 32px;
     margin: 0;
 }
 .tile.small h2 {
