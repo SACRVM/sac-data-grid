@@ -147,6 +147,8 @@ class SacLog extends HTMLElement {
                     font-family: inherit;
                 }
                 .hdr button:hover { color: var(--text); background: var(--hover); }
+                /* Press: answers the moment it goes down. */
+                .hdr button:active { background: var(--hover-strong); transition-duration: 0s; }
                 .body {
                     flex: 1;
                     overflow-y: auto;
@@ -167,6 +169,8 @@ class SacLog extends HTMLElement {
                 }
                 @media (hover: none) {
                     .hdr button:hover { color: color-mix(in srgb, var(--fg) 78%, var(--bg)); background: none; }
+                    /* …but the press itself still shows (a touch is a hover too). */
+                    .hdr button:active { background: var(--hover-strong); }
                 }
                 .entry {
                     padding: 0.2rem 0;
@@ -186,10 +190,12 @@ class SacLog extends HTMLElement {
 
                 /* Scrollbar theme — duplicated because the global rule in
                    ui.css doesn't pierce Shadow DOM. */
-                .body::-webkit-scrollbar { width: 6px; }
+                .body::-webkit-scrollbar { width: var(--scrollbar-size); }
                 .body::-webkit-scrollbar-track { background: transparent; }
                 .body::-webkit-scrollbar-thumb {
                     background: var(--scrollbar-thumb);
+                    background-clip: content-box;
+                    border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
                 }
             </style>

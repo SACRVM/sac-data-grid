@@ -92,7 +92,7 @@
  * Tiles), or a link tile's id — the same keys `sac:layout` reports.
  *
  * Per-tile menu: `menu` on a manifest, a manifest `tiles` entry, a link, or
- * via setMenu() — [{ id, label, labelKey, icon, danger, disabled, onClick }]
+ * via setMenu() — [{ id, label, labelKey, icon, checked, type, danger, disabled, onClick }]
  * with "-" for a separator. It is the tile's CONTEXT menu (sac.contextMenu):
  * right-click, a long-press on touch, Shift+F10 / the Menu key on a
  * focused tile — no corner button. Its last entry, while the layout can be
@@ -889,7 +889,8 @@ class SacLauncher extends HTMLElement {
     _contextItems(cell) {
         if (!cell || !cell._entry || cell.classList.contains("sac-launcher-add-cell")) return null;
         const list = (cell._menuItems || []).map((it, i) => it === "-" ? "-" : {
-            id: it.id, icon: it.icon, danger: !!it.danger, disabled: !!it.disabled, _index: i,
+            id: it.id, icon: it.icon, checked: it.checked, type: it.type,
+            danger: !!it.danger, disabled: !!it.disabled, _index: i,
             label: it.labelKey ? t(it.labelKey, it.label || "") : String(it.label || ""),
         });
         if (this._canEdit() && this.getAttribute("drag") !== "none") {
@@ -1376,7 +1377,8 @@ class SacLauncher extends HTMLElement {
                 color: var(--text-muted);
                 cursor: pointer;
                 --icon-size: 14px;
-                transition: background 120ms, color 120ms, border-color 120ms;
+                transition: background 120ms, color 120ms, border-color 120ms,
+                            transform 0.2s var(--ease-smooth);
             }
             sac-launcher .sac-launcher-ctrl:hover:not(:disabled) {
                 background: var(--hover-strong);
@@ -1386,6 +1388,11 @@ class SacLauncher extends HTMLElement {
                 background: color-mix(in srgb, var(--danger) 12%, transparent);
                 color: var(--danger);
                 border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+            }
+            /* Press: answers the moment it goes down. */
+            sac-launcher .sac-launcher-ctrl:active:not(:disabled) {
+                transform: scale(0.97);
+                transition-duration: 0.1s;
             }
             sac-launcher .sac-launcher-ctrl:focus-visible {
                 outline: 2px solid var(--accent);
@@ -1488,7 +1495,9 @@ class SacLauncher extends HTMLElement {
                 color: var(--text-muted);
                 --icon-size: 32px;
             }
-            sac-launcher .sac-launcher-add:hover {
+            /* [edit] + .tile: the tile only shows in edit mode, where ui.css's
+               arrange-mode reset ([data-arranging] .tile:hover) would win. */
+            sac-launcher[edit] .tile.sac-launcher-add:hover {
                 transform: none;
                 box-shadow: none;
                 background: var(--hover);
@@ -1499,8 +1508,15 @@ class SacLauncher extends HTMLElement {
                 transform: none;
                 color: var(--accent);
             }
+            /* Press: no hover lift to give back, so a small push (a tile never
+               scales — ui.css). [edit] + .tile outrank ui.css's arrange-mode
+               reset, which would swallow it: this tile only shows in edit mode. */
+            sac-launcher[edit] .tile.sac-launcher-add:active {
+                transform: translateY(2px) translateZ(0);
+                transition-duration: 0.1s;
+            }
             @media (hover: none) {
-                sac-launcher .sac-launcher-add:hover {
+                sac-launcher[edit] .tile.sac-launcher-add:hover {
                     background: transparent;
                     border-color: var(--border-strong);
                     color: var(--text-muted);

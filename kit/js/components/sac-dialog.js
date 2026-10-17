@@ -18,13 +18,27 @@
  *   dlg.open();
  *
  * Keyboard:
+ *   - On open           → a button has focus, so Enter acts at once: the one
+ *                         marked `default: true`, else the first primary,
+ *                         else the first that isn't destructive (Cancel) —
+ *                         disabled ones and one still waiting to arm skipped.
+ *                         A body element with `autofocus` takes it instead;
+ *                         so does a field focused right after open() (a
+ *                         prompt's), and Enter there presses the primary.
+ *   - ← / → (↑ / ↓)     → move focus through the action buttons while focus
+ *                         is on one of them (or the dialog itself): wrapping,
+ *                         disabled ones skipped; Home / End = first / last.
+ *                         ↑ / ↓ follow the bottom sheet's stacked buttons.
+ *                         Inside the body's fields the arrows are theirs.
+ *   - Enter / Space     → presses the focused button (native). A focus ring
+ *                         marks it — also when script set the focus, where
+ *                         :focus-visible stays dark — never after a click.
  *   - Escape            → close with action=null. Something inside the dialog
  *                         that handles Escape itself goes first: an open field
  *                         popover (sac-select list, sac-date-field calendar),
  *                         a menu, a field reverting its typing. It consumes
  *                         the key (stopPropagation or preventDefault) and the
  *                         dialog stays; the next Escape closes it.
- *   - Enter             → activates focused button (native).
  *   - Tab / Shift-Tab   → focus trap over everything focusable in the body,
  *                         then the buttons, in document order — including
  *                         the inputs inside kit fields' shadow roots, and
@@ -33,12 +47,16 @@
  *
  * Arming:
  *   - A button with armAfterMs waits N ms, then receives focus so Enter acts.
- *   - If the user's pointer enters (or a finger touches) any other button
- *     before the arm fires, the timer is cancelled — we don't steal focus
- *     from an actively-interacting user.
+ *     Until then the dialog sits on the safe button (the order above).
+ *   - Any key (an arrow, Tab, typing) and the pointer entering (or a finger
+ *     touching) any other button cancel the timer — we never steal focus
+ *     from an actively-interacting user. Nor does it fire into a field.
  *
  * Buttons: { action, label, kind: "default"|"primary"|"destructive",
- *            armAfterMs?, disabled?, labelKey? }. setDisabled(action, flag)
+ *            default?, armAfterMs?, disabled?, labelKey? }. `default: true`
+ *            = the button focused on open.
+ *
+ *            setDisabled(action, flag)
  *            toggles one later (a Save that waits for a filename). labelKey
  *            makes `label` the English fallback of sac.t(labelKey): the
  *            button then follows a runtime language switch in place.
@@ -56,6 +74,20 @@
  * bottom edge above the home-indicator safe area, at most 85dvh tall with the
  * body scrolling, actions full-width and stacked (the last button, usually
  * the primary one, on top). Focus trap and Escape are unchanged.
+ *   The grabber bar and the title row pull the sheet: it follows the finger
+ *   1:1 (and resists upwards); let go past its middle — or flick it down —
+ *   and it leaves (action=null, like Escape), else it springs back. Caught
+ *   mid-flight, it carries on from where it is. Needs sac.motion
+ *   (lib/motion.js); without it the sheet does not pull.
+ *
+ * Closing leaves the way it came: the sheet slides back down, a centred
+ * dialog shrinks and fades (mirroring the entry). sac:action fires at once;
+ * the element keeps [open] (and gets [closing], no pointer events) until the
+ * exit has played, then fires sac:closed. Remove the element on sac:closed,
+ * not on sac:action, or the exit is cut short (sac.dialog.* do this).
+ *
+ * Events: sac:open · sac:action { action } · sac:closed — all bubble +
+ *   composed.
  */
 class SacDialog extends HTMLElement {
     constructor() {
@@ -64,6 +96,7 @@ class SacDialog extends HTMLElement {
         this.buttons = [];
         this._armTimer = null;
         this._resolved = false;
+        this._pointer = false;        // the last focus came from the pointer: no ring
         this._onKeydown = this._onKeydown.bind(this);
         // Escape from inside the dialog, bubble phase: see _onKeydown.
         this.addEventListener("keydown", (e) => this._onInnerEscape(e));
@@ -107,6 +140,9 @@ class SacDialog extends HTMLElement {
 
     open() {
         this._resolved = false;
+        this._swiped = false;
+        this._sheetY = 0;
+        this.removeAttribute("closing");
         // Remember who to hand focus back to when we close (the trigger).
         this._restoreFocus = document.activeElement;
         this._render();
@@ -115,6 +151,11 @@ class SacDialog extends HTMLElement {
         this.focus();
         document.addEventListener("keydown", this._onKeydown, true);
         if (!SacDialog._open.includes(this)) SacDialog._open.push(this);
+        // Enter acts at once: a body element marked autofocus, else the
+        // default button. A caller that focuses a field next keeps it.
+        const auto = this.querySelector("[autofocus]");
+        if (auto) auto.focus();
+        else { const btn = this._defaultButton(); if (btn) this._focusButton(btn); }
         this._startArmTimer();
         this.dispatchEvent(new CustomEvent("sac:open", { bubbles: true, composed: true }));
     }
@@ -126,7 +167,8 @@ class SacDialog extends HTMLElement {
         document.removeEventListener("keydown", this._onKeydown, true);
         const at = SacDialog._open.indexOf(this);
         if (at >= 0) SacDialog._open.splice(at, 1);
-        this.removeAttribute("open");
+        if (this._sheetSpring) { this._sheetSpring.stop(); this._sheetSpring = null; }
+        this._leave();
         // Return focus to the element that opened us — a modal that drops focus
         // on the body strands keyboard and screen-reader users.
         const back = this._restoreFocus;
@@ -183,8 +225,52 @@ class SacDialog extends HTMLElement {
         return a;
     }
 
+    /** The button focused on open: `default: true`, else the first primary,
+     *  else the first non-destructive — never disabled, never one waiting to arm. */
+    _defaultButton() {
+        const btns = this.shadowRoot.querySelectorAll(".actions .btn");
+        const ok = (spec, i) => btns[i] && !btns[i].disabled && !(spec.armAfterMs > 0);
+        const pick = (test) => this.buttons.findIndex((b, i) => test(b) && ok(b, i));
+        let i = pick((b) => b.default);
+        if (i < 0) i = pick((b) => b.kind === "primary");
+        if (i < 0) i = pick((b) => b.kind !== "destructive");
+        return i < 0 ? null : btns[i];
+    }
+
+    _focusButton(btn) {
+        this._pointer = false;
+        btn.focus({ preventScroll: true });
+    }
+
+    /** ← / → (and ↑ / ↓, Home / End) through the enabled action buttons —
+     *  only while focus is on one of them or on the dialog itself. */
+    _moveButtons(e) {
+        const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1, Home: "first", End: "last" };
+        if (!(e.key in steps) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+        const row = this.shadowRoot.querySelector(".actions");
+        const btns = Array.from(row.querySelectorAll(".btn")).filter((b) => !b.disabled);
+        const act = SacDialog._deepActive();
+        const at = btns.indexOf(act);
+        if (!btns.length || (at < 0 && act !== this)) return false;
+        e.preventDefault();
+        let step = steps[e.key];
+        // The bottom sheet stacks them last-on-top: ↑ is the next one there.
+        if ((e.key === "ArrowUp" || e.key === "ArrowDown")
+            && getComputedStyle(row).flexDirection === "column-reverse") step = -step;
+        const n = btns.length;
+        const to = step === "first" ? 0 : step === "last" ? n - 1
+            : at < 0 ? (step > 0 ? 0 : n - 1) : (at + step + n) % n;
+        this._focusButton(btns[to]);
+        return true;
+    }
+
     _onKeydown(e) {
         if (SacDialog._open[SacDialog._open.length - 1] !== this) return;
+        // The user is on the keys: the arm timer never takes focus from them,
+        // and a focus they move gets its ring.
+        this._pointer = false;
+        if (e.key !== "Escape") this._cancelArmTimer();
+        if (this._moveButtons(e)) return;
         if (e.key === "Escape") {
             // From inside the dialog: the target gets its say first (an open
             // popover, a field reverting) — _onInnerEscape decides on the way
@@ -255,6 +341,9 @@ class SacDialog extends HTMLElement {
             this._armTimer = null;
             const btn = this.shadowRoot.querySelectorAll(".btn")[armed];
             if (!btn) return;
+            // Never into a field the user is in — only from a button or the dialog.
+            const act = SacDialog._deepActive();
+            if (act && act !== this && act !== document.body && !btn.parentNode.contains(act)) return;
             // .armed gives the explicit visual cue — :focus-visible won't
             // fire reliably for programmatic focus (Chrome hides the ring
             // when focus is set by script without a prior keyboard event).
@@ -344,12 +433,12 @@ class SacDialog extends HTMLElement {
                 /* Scrollbar — the kit recipe (ui.css §5), re-stated because
                    ::-webkit-scrollbar does not pierce a shadow root. Firefox, which has
                    no ::-webkit-scrollbar, gets the standard pair instead. */
-                .body::-webkit-scrollbar { width: 10px; height: 10px; }
+                .body::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
                 .body::-webkit-scrollbar-track { background: transparent; }
                 .body::-webkit-scrollbar-thumb {
                     background: var(--scrollbar-thumb);
                     background-clip: content-box;
-                    border: 2px solid transparent;
+                    border: var(--scrollbar-gap) solid transparent;
                     border-radius: 999px;
                 }
                 .body::-webkit-scrollbar-thumb:hover {
@@ -386,14 +475,25 @@ class SacDialog extends HTMLElement {
                     border: 1px solid transparent;
                     background: color-mix(in srgb, var(--fg) 6%, transparent);
                     color: var(--text);
-                    transition: background 120ms, color 120ms, border-color 120ms, box-shadow 120ms;
+                    transition: background 120ms, color 120ms, border-color 120ms, box-shadow 120ms,
+                                transform 0.2s var(--ease-smooth);
                     outline: none;
                 }
                 .btn:hover {
                     background: var(--hover-strong);
                     border-color: color-mix(in srgb, var(--fg) 18%, transparent);
                 }
-                .btn:focus-visible {
+                /* Press: the button gives the moment the pointer goes down —
+                   fast in (100ms), back at the normal pace. Transform only,
+                   so an .armed cue stays as it is (pointerdown disarms). */
+                .btn:active:not(:disabled) {
+                    transform: scale(0.97);
+                    transition-duration: 0.1s;
+                }
+                /* .focus: the ring for a focus set by script or the keys,
+                   where :focus-visible stays dark — Enter presses this one. */
+                .btn:focus-visible,
+                .btn.focus {
                     outline: 2px solid var(--accent);
                     outline-offset: 2px;
                 }
@@ -424,7 +524,8 @@ class SacDialog extends HTMLElement {
                     color: var(--text);
                     border-color: var(--danger);
                 }
-                .btn.destructive:focus-visible {
+                .btn.destructive:focus-visible,
+                .btn.destructive.focus {
                     outline-color: var(--danger);
                 }
 
@@ -445,6 +546,25 @@ class SacDialog extends HTMLElement {
                     from { opacity: 1; transform: translateY(100%); }
                     to   { opacity: 1; transform: none; }
                 }
+                /* Leaving: the entry's path backwards, with the easing
+                   mirrored (ease-in for its ease-out). No "from": a backdrop
+                   a pull already dimmed fades on from where it is. */
+                @keyframes fade-out {
+                    to { opacity: 0; }
+                }
+                @keyframes pop-out {
+                    from { opacity: 1; transform: scale(1); }
+                    to   { opacity: 0; transform: scale(0.96); }
+                }
+                @keyframes sheet-out {
+                    from { opacity: 1; transform: none; }
+                    to   { opacity: 1; transform: translateY(100%); }
+                }
+                :host([closing]) { pointer-events: none; }
+                :host([closing]) .backdrop { animation: fade-out 150ms ease-in forwards; }
+                :host([closing]) .panel { animation: pop-out 150ms ease-in forwards; }
+
+                .grabber { display: none; }
 
                 @media (max-width: 768px), (max-height: 480px) and (pointer: coarse) {
                     :host { align-items: flex-end; }
@@ -458,6 +578,37 @@ class SacDialog extends HTMLElement {
                         transform: translateY(100%);
                         animation: sheet-in 220ms var(--ease-smooth) forwards;
                     }
+                    :host([closing]) .panel {
+                        animation: sheet-out 220ms cubic-bezier(0.8, 0, 0.6, 1) forwards;
+                    }
+                    /* The grabber and the title row are the sheet's grip:
+                       together at least 44px tall, and a finger there pulls
+                       the sheet instead of scrolling the page. */
+                    .grabber {
+                        display: block;
+                        flex: none;
+                        position: relative;
+                        height: 24px;
+                        cursor: grab;
+                        touch-action: none;
+                    }
+                    .grabber::before {
+                        content: "";
+                        position: absolute;
+                        top: 9px;
+                        left: 50%;
+                        width: 36px;
+                        height: 5px;
+                        margin-left: -18px;
+                        border-radius: 999px;
+                        background: color-mix(in srgb, var(--fg) 25%, transparent);
+                    }
+                    .title {
+                        padding-top: 4px;
+                        cursor: grab;
+                        touch-action: none;
+                        user-select: none;
+                    }
                     .actions {
                         flex-direction: column-reverse;
                         align-items: stretch;
@@ -468,7 +619,21 @@ class SacDialog extends HTMLElement {
                     .btn { min-height: 44px; }
                 }
                 @media (prefers-reduced-motion: reduce) {
-                    .backdrop, .panel { animation-duration: 1ms; }
+                    .backdrop, .panel,
+                    :host([closing]) .backdrop, :host([closing]) .panel { animation-duration: 1ms; }
+                }
+                /* Reduced transparency / more contrast: the panel turns
+                   solid (same hue, nothing shining through) and drops the
+                   blur. The backdrop is a scrim — it keeps its dim and only
+                   loses the blur. Background/blur/border only: the sheet
+                   pull's inline opacity/transform are untouched. */
+                @media (prefers-reduced-transparency: reduce) {
+                    .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+                }
+                @media (prefers-contrast: more) {
+                    .backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+                    .panel { background: var(--glass-solid); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--border-contrast); }
                 }
                 @keyframes pop-in {
                     to { opacity: 1; transform: scale(1); }
@@ -476,6 +641,7 @@ class SacDialog extends HTMLElement {
             </style>
             <div class="backdrop" part="backdrop"></div>
             <div class="panel" part="panel" role="dialog" aria-modal="true">
+                <div class="grabber" part="grabber" aria-hidden="true"></div>
                 <div class="title" id="dlg-title"></div>
                 <div class="body"><slot></slot></div>
                 <div class="actions"></div>
@@ -484,6 +650,108 @@ class SacDialog extends HTMLElement {
         this._renderHeader();
         this._renderButtons();
         this.shadowRoot.querySelector(".backdrop").addEventListener("click", () => this.close(null));
+        this._wireSheet();
+    }
+
+    /** Compact: the grabber and the title row pull the sheet down. Let go
+     *  past its middle — or flicked down — it leaves; else it springs back. */
+    _wireSheet() {
+        const panel = this.shadowRoot.querySelector(".panel");
+        const backdrop = this.shadowRoot.querySelector(".backdrop");
+        const grips = [this.shadowRoot.querySelector(".grabber"), this.shadowRoot.querySelector(".title")];
+        let drag = null;
+        const place = (y) => {
+            this._sheetY = y;
+            panel.style.transform = `translateY(${y}px)`;
+            backdrop.style.opacity = String(Math.min(1, Math.max(0, 1 - y / (panel.offsetHeight || 1))));
+        };
+        const down = (e) => {
+            const m = SacDialog._motion();
+            if (!m || !SacDialog._sheet || !SacDialog._sheet.matches) return;
+            if (this._resolved || !this.hasAttribute("open")) return;
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            if (this._sheetSpring) { this._sheetSpring.stop(); this._sheetSpring = null; }
+            // The entry animation holds the panel (a fill beats inline
+            // styles): take it over at the place it shows right now.
+            if (panel.style.animation !== "none") {
+                const cs = getComputedStyle(panel);
+                const y = new DOMMatrixReadOnly(cs.transform).m42;
+                panel.style.opacity = cs.opacity;      // the base style is the entry's start: 0
+                panel.style.animation = "none";
+                backdrop.style.animation = "none";
+                place(y);
+            }
+            e.currentTarget.setPointerCapture(e.pointerId);
+            drag = { id: e.pointerId, y0: e.clientY - this._sheetY, track: m.tracker() };
+            drag.track.add(this._sheetY, e.timeStamp);
+            e.preventDefault();
+        };
+        const move = (e) => {
+            if (!drag || e.pointerId !== drag.id || this._resolved) return;
+            const raw = e.clientY - drag.y0;
+            place(raw < 0 ? SacDialog._motion().rubberband(raw, panel.offsetHeight) : raw);
+            drag.track.add(this._sheetY, e.timeStamp);
+        };
+        const up = (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const v = e.type === "pointerup" ? drag.track.velocity(e.timeStamp) : 0;
+            drag = null;
+            if (this._resolved) return;
+            const m = SacDialog._motion();
+            const h = panel.offsetHeight;
+            const dismiss = this._sheetY + m.project(v) > h / 2;
+            const s = this._sheetSpring = m.spring({
+                from: this._sheetY, to: dismiss ? h : 0, velocity: v,
+                damping: !dismiss && Math.abs(v) > SacDialog.FLICK ? 0.8 : 1,
+                response: 0.3,
+                onUpdate: place,
+                onDone: () => {
+                    if (this._sheetSpring !== s) return;
+                    this._sheetSpring = null;
+                    if (dismiss) { this._swiped = true; this.close(null); }
+                },
+            });
+        };
+        for (const g of grips) {
+            if (!g) continue;
+            g.addEventListener("pointerdown", down);
+            g.addEventListener("pointermove", move);
+            g.addEventListener("pointerup", up);
+            g.addEventListener("pointercancel", up);
+        }
+    }
+
+    /** The exit: [closing] plays it, then [open] goes and sac:closed fires.
+     *  A sheet a pull has taken over is carried down by a spring from where
+     *  it is; a fallback timer ends it where no animation runs (a hidden
+     *  tab, a display:none ancestor). Reopened meanwhile: nothing happens. */
+    _leave() {
+        const panel = this.shadowRoot.querySelector(".panel");
+        const backdrop = this.shadowRoot.querySelector(".backdrop");
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            if (!this._resolved) return;
+            this.removeAttribute("closing");
+            this.removeAttribute("open");
+            this.dispatchEvent(new CustomEvent("sac:closed", { bubbles: true, composed: true }));
+        };
+        const timer = setTimeout(finish, 600);
+        if (!panel || !this.hasAttribute("open")) { finish(); return; }
+        if (backdrop) backdrop.style.animation = "";        // fade on from where a pull left it
+        this.setAttribute("closing", "");
+        const m = SacDialog._motion();
+        if (panel.style.animation === "none" && m) {
+            m.spring({
+                from: this._sheetY || 0, to: panel.offsetHeight, response: 0.3,
+                onUpdate: (y) => { panel.style.transform = `translateY(${y}px)`; },
+                onDone: finish,
+            });
+        } else {
+            panel.addEventListener("animationend", (e) => { if (e.target === panel) finish(); });
+        }
     }
 
     _renderHeader() {
@@ -502,6 +770,8 @@ class SacDialog extends HTMLElement {
     _renderButtons() {
         const row = this.shadowRoot.querySelector(".actions");
         row.innerHTML = "";
+        // A focus the pointer gave shows no ring (as :focus-visible).
+        row.addEventListener("pointerdown", () => { this._pointer = true; }, true);
         this.buttons.forEach((spec) => {
             const btn = document.createElement("button");
             btn.className = "btn" + (spec.kind && spec.kind !== "default" ? " " + spec.kind : "");
@@ -522,6 +792,8 @@ class SacDialog extends HTMLElement {
             };
             btn.addEventListener("mouseenter", disarm);
             btn.addEventListener("pointerdown", disarm);
+            btn.addEventListener("focus", () => btn.classList.toggle("focus", !this._pointer));
+            btn.addEventListener("blur", () => btn.classList.remove("focus"));
             row.appendChild(btn);
         });
     }
@@ -529,5 +801,15 @@ class SacDialog extends HTMLElement {
 
 /** Open dialogs, oldest first: only the last one handles keys. */
 SacDialog._open = [];
+
+/** The compact rule from the stylesheet above: a bottom sheet. */
+SacDialog._sheet = window.matchMedia
+    ? matchMedia("(max-width: 768px), (max-height: 480px) and (pointer: coarse)") : null;
+
+/** px/s: a release faster than this was a flick (a little bounce back). */
+SacDialog.FLICK = 400;
+
+/** sac.motion when lib/motion.js is loaded, else null. */
+SacDialog._motion = () => (window.sac && window.sac.motion) || null;
 
 customElements.define("sac-dialog", SacDialog);
