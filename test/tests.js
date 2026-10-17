@@ -1133,7 +1133,10 @@ module.exports = function ({ test, eq, ok, center }) {
     });
     /* ------------------------------------------------- paste, cut, the form -- */
 
-    const dialogOpen = (p) => p.eval("!!document.querySelector('sac-dialog[open]')");
+    // A closing sac-dialog keeps [open] (and has [closing]) while its exit
+    // plays: open means shown and not leaving.
+    const OPEN_DIALOG = "sac-dialog[open]:not([closing])";
+    const dialogOpen = (p) => p.eval(`!!document.querySelector('${OPEN_DIALOG}')`);
 
     test("paste TSV: fill, block, parse, reject, extend, one undo", async (p) => {
         await p.load("/test/fixture.html?rows=6&save-mode=batch");
@@ -1247,6 +1250,20 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.frames(3);
         ok(!(await dialogOpen(p)), "closed");
         ok(await p.eval("fx.grid.shadowRoot.activeElement === fx.grid._scroller"), "focus back");
+    });
+
+    test("form: the dialog plays its exit, then leaves the page on sac:closed", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=read");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        eq(await p.eval(`(async () => {
+            const dlg = document.querySelector("sac-dialog");
+            dlg.close(null);
+            const leaving = dlg.isConnected && dlg.hasAttribute("closing");
+            await new Promise((done) => dlg.addEventListener("sac:closed", done, { once: true }));
+            return [leaving, dlg.isConnected, !!fx.grid._formState];
+        })()`), [true, false, false], "still there while leaving, removed once it has left");
     });
 
     test("sheet mode: Shift+Enter opens the record", async (p) => {
@@ -1415,6 +1432,62 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("fx.grid._pop.matches(':popover-open')"), false, "focus leaving closed it");
     });
 
+    test("the scrollbars take the kit's measure", async (p) => {
+        await p.load("/test/fixture.html?rows=50");
+        const size = await p.eval("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--scrollbar-size'))");
+        eq(await p.eval("fx.grid._scroller.offsetWidth - fx.grid._scroller.clientWidth"), size, "the rows' track");
+        await p.eval("fx.grid._openFilter(7)");
+        await p.frames(2);
+        eq(await p.eval(`(() => {
+            const list = fx.grid._pop.querySelector(".opts");
+            list.style.maxHeight = "40px";
+            return list.offsetWidth - list.clientWidth;
+        })()`), size, "a filter's option list");
+    });
+
+    test("a button in the grid gives under the pointer", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        await p.eval("fx.grid._openFilter(1)");
+        await p.frames(2);
+        const { x, y } = await center(p, "fx.grid._pop.querySelector('.btn.primary')");
+        await p.mouse("mouseMoved", x, y, { buttons: 0 });
+        await p.mouse("mousePressed", x, y);
+        await p.eval("new Promise(r => setTimeout(r, 150))");
+        const pressed = await p.eval("getComputedStyle(fx.grid._pop.querySelector('.btn.primary')).transform");
+        await p.mouse("mouseReleased", x, y);
+        ok(/^matrix\(0\.97,/.test(pressed), `scaled down while pressed: ${pressed}`);
+    });
+
+    test("the filter popover turns solid under reduced transparency and more contrast", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        await p.eval("fx.grid._openFilter(1)");
+        await p.frames(2);
+        const look = () => p.eval(`(() => {
+            const cs = getComputedStyle(fx.grid._pop);
+            return [cs.backdropFilter, cs.backgroundColor, cs.borderTopColor];
+        })()`);
+        const token = (name, prop) => p.eval(`(() => {
+            const probe = document.createElement("div");
+            probe.style.${prop} = "var(${name})";
+            fx.grid.after(probe);
+            const v = getComputedStyle(probe)[${JSON.stringify(prop)}];
+            probe.remove();
+            return v;
+        })()`);
+        ok((await look())[0].includes("blur"), "blurred glass by default");
+        try {
+            await p.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+            const solid = await look();
+            eq([solid[0], solid[1]], ["none", await token("--glass-solid", "backgroundColor")], "reduced transparency: solid, no blur");
+            await p.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-contrast", value: "more" }] });
+            const contrast = await look();
+            eq(contrast, ["none", await token("--glass-solid", "backgroundColor"), await token("--border-contrast", "borderTopColor")],
+                "more contrast: solid, no blur, a visible edge");
+        } finally {
+            await p.send("Emulation.setEmulatedMedia", { features: [] });
+        }
+    });
+
     test("form: Escape with changes asks, Keep editing restores them", async (p) => {
         await p.load("/test/fixture.html?rows=10&mode=form");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
@@ -1424,20 +1497,20 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.type("Changed");
         await p.key("Escape");
         await p.frames(4);
-        eq(await p.eval("document.querySelector('sac-dialog[open]').getAttribute('title')"), "Discard your changes?", "asks");
-        await p.eval("document.querySelector('sac-dialog[open]').trigger('keep')");
+        eq(await p.eval(`document.querySelector('${OPEN_DIALOG}').getAttribute('title')`), "Discard your changes?", "asks");
+        await p.eval(`document.querySelector('${OPEN_DIALOG}').trigger('keep')`);
         await p.eval("new Promise(r => setTimeout(r, 250))");   // sac.dialog answers after its fade-out
         await p.frames(2);
         eq(await p.eval("fx.grid._formState && fx.grid._formState.fields[1].focus.value"), "Changed", "reopened with the typed text");
         await p.key("Escape");
         await p.frames(4);
-        await p.eval("document.querySelector('sac-dialog[open]').trigger('discard')");
+        await p.eval(`document.querySelector('${OPEN_DIALOG}').trigger('discard')`);
         await p.eval("new Promise(r => setTimeout(r, 250))");
         await p.frames(2);
         eq([await dialogOpen(p), await p.eval("fx.data[1].name")], [false, "Ben 2"], "discard drops them");
         await p.key("Enter");
         await p.frames(3);
-        await p.eval("document.querySelector('sac-dialog[open]').trigger('cancel')");
+        await p.eval(`document.querySelector('${OPEN_DIALOG}').trigger('cancel')`);
         await p.frames(3);
         ok(!(await dialogOpen(p)), "an explicit Cancel does not ask");
     });
@@ -1458,7 +1531,7 @@ module.exports = function ({ test, eq, ok, center }) {
         } finally {
             await p.eval("sac.lang.set('en')");
         }
-        await p.eval("document.querySelector('sac-dialog[open]').trigger('cancel')");
+        await p.eval(`document.querySelector('${OPEN_DIALOG}').trigger('cancel')`);
     });
 
     test("removing the grid closes its form and menu", async (p) => {

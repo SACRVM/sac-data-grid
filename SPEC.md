@@ -194,6 +194,19 @@ adds what the grid builds on since:
 - `sac-menu`: arrow keys work inside another component's shadow root.
 - `sac-chip-input`: suggestions carry `label` / `labelKey` (the shown text).
 
+**Kit 2.32 and 2.33** add what the grid uses when it is there; on an older
+kit it keeps the earlier behaviour (fallback values, a timed removal):
+
+- `--scrollbar-size` / `--scrollbar-gap`: the scrollbars inside the grid
+  take the kit's measure.
+- `sac-dialog` plays an exit and then fires `sac:closed`: the record form
+  is removed on it, not on `sac:action`. With `lib/motion.js` loaded, its
+  bottom sheet pulls down on phones.
+- `--glass-solid` / `--border-contrast`: the filter popover turns solid
+  under `prefers-reduced-transparency` and `prefers-contrast: more`.
+- Press states: the grid's own buttons, pager and filter options answer on
+  pointer-down, like the kit's controls.
+
 If a gap in the kit shows up: open an issue on SACRVM/sacrvm-appkit instead
 of working around it inside the grid.
 

@@ -44,7 +44,8 @@ if (saved) grid.view = saved;`)}
         <p>The grid fills the height you give it (default 420px). From the kit it uses the cell-editor
            fields, <code>sac-chip</code>, <code>sac-menu</code>, <code>sac-dialog</code>,
            <code>sac-tooltip</code> and <code>sac-segmented-control</code>; all are in
-           <code>kit/js/all.js</code>.</p>
+           <code>kit/js/all.js</code>. Picking scripts by hand, add <code>kit/js/lib/motion.js</code> as well:
+           with it the record form's bottom sheet pulls down on phones (kit 2.33 and newer).</p>
 
         <h2 id="attributes">Attributes</h2>
         ${table("Attribute", [
@@ -208,8 +209,10 @@ if (saved) grid.view = saved;`)}
         <p>Tokens only: light, dark and a per-app <code>--accent</code> work without setup.
            <code>--grid-bg</code> (default <code>--bg</code>) is the ground frozen cells paint: set it to the surface
            the grid sits on. <code>--cell-padding-inline</code> is shared with the kit's cell editors.
-           CSS parts: <code>grid</code>, <code>status</code>. Windows high contrast (forced colors) and
-           <code>prefers-reduced-motion</code> are respected.</p>
+           CSS parts: <code>grid</code>, <code>status</code>. Windows high contrast (forced colors),
+           <code>prefers-reduced-motion</code>, <code>prefers-reduced-transparency</code> and
+           <code>prefers-contrast: more</code> are respected; the scrollbars take the kit's measure
+           (<code>--scrollbar-size</code>, <code>--scrollbar-gap</code>).</p>
 
         <h2 id="a11y">Accessibility</h2>
         <p>The ARIA grid pattern: <code>role="grid"</code> with <code>aria-rowcount</code> / <code>aria-colcount</code>
