@@ -58,6 +58,7 @@ if (saved) grid.view = saved;`)}
             ["lines", "<code>quiet</code> (default) · <code>grid</code>: row lines only, or cell grid lines."],
             ["mode-toggle", "Presence: a Read · Sheet · Form switch in the footer."],
             ["compact-edit", "<code>form</code> (default) · <code>read</code>: on phones, edit through the record form, or read only."],
+            ["rows", "<code>fixed</code>: the rows can be edited but not added or deleted (rows that come from an import, say). No \"new row\" line, no New / Delete in the row menu or the record form, <code>addRow()</code> returns <code>null</code>, a paste fills only the rows there are. Absent: rows can be added and deleted."],
             ["unload-guard", "<code>off</code>: no \"leave this page?\" question from the grid while rows are unsaved or saving (the host asks itself, or saves in another way). Either way, in <code>cell</code> / <code>row</code> save mode the grid saves unsaved rows when it is taken out of the page or the page hides."],
             ["row-header", "<code>marks</code> (default) · <code>numbers</code> · <code>none</code>: the column before the data. <code>marks</code> is narrow and shows only a row's state (<code>*</code> new, <code>+</code> the new line, a dot for a row with errors); <code>numbers</code> the row's position. A click selects the row; a right-click (a long press on touch) opens the row menu."],
         ])}
@@ -69,6 +70,7 @@ if (saved) grid.view = saved;`)}
             ["view", "<code>{ columns: { field: { width, hidden } }, sort, filter }</code>: get it to persist, set it to restore."],
             ["mode, saveMode", "Mirror the attributes."],
             ["dirty", "Read-only: the number of rows with unsaved changes (what <code>unload-guard</code> watches)."],
+            ["rowMenu", "Optional <code>(row, info) =&gt; items</code>: your own items, first in the row menu (right-click, long press, Shift+F10). <a href=\"#row-menu\">Below</a>."],
             ["reload()", "Load again, keeping scroll position and selection. Resolves when loaded."],
             ["save()", "Save every dirty row. Resolves with <code>{ saved, errors, invalid }</code>."],
             ["revert()", "Throw away every unsaved change."],
@@ -151,6 +153,17 @@ if (saved) grid.view = saved;`)}
            numeric-aware, language-aware sorting with empty values last, the filter descriptors, totals, and
            save / create / remove on the array (<code>src.rows</code>, <code>src.setRows()</code>).
            <code>compare: { status: (a, b) =&gt; … }</code> gives a field its own order, for example a select column by its label.</p>
+
+        <h3 id="row-menu">Your items in the row menu</h3>
+        ${code(`grid.rowMenu = (row, info) => [                // info: { id, index, field, rows }
+    { id: "receipt", label: "Open receipt", icon: "document", onClick: (row) => openReceipt(row) },
+    "-",                                                    // a separator
+    { id: "only", label: "Only this counterparty", labelKey: "app.only-this",
+      disabled: !row.counterparty, onClick: (row) => filterTo(row.counterparty) },
+];`)}
+        <p>The items have the shape of the kit's <code>sac.contextMenu</code> items. They are asked for on every
+           opening, for the row under the cursor (<code>info.rows</code>: the loaded rows of the selected range),
+           and come before the grid's own items.</p>
 
         <h2 id="events">Events</h2>
         <p>All bubble and are composed.</p>

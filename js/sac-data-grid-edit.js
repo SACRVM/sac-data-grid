@@ -165,9 +165,10 @@
         if (created) rowEl._rh.textContent = "*";
     };
 
-    /** The "new row" line: sheet mode, an editable source, the end in sight. */
+    /** The "new row" line: sheet mode, an editable source, rows that are
+     *  not fixed, the end in sight. */
     P._newLine = function () {
-        if (this.mode !== "sheet" || !this._editable() || this._compact()) return 0;
+        if (this.mode !== "sheet" || !this._editable() || this._compact() || this._fixedRows()) return 0;
         if (this._paging() === "pages") {
             if (this._total != null) return this._page >= Math.max(0, Math.ceil(this._total / this._pageSize()) - 1) ? 1 : 0;
             const blk = this._blocks.get(this._page);
@@ -1374,7 +1375,7 @@
 
     /** Append a new, unsaved row (optionally with values); the cursor moves to it. */
     P.addRow = function (values, opts) {
-        if (!this._built || !this._editable() || this.mode === "read") return null;
+        if (!this._built || !this._editable() || this.mode === "read" || this._fixedRows()) return null;
         this._edState();
         if (this._editor) this._commitEdit(null);
         const row = this._createRow(values);
@@ -1408,7 +1409,7 @@
      *  once, or after the Undo toast (row / cell save modes), or on save(). */
     P._deleteRows = function (rs) {
         this._edState();
-        if (!this._editable() || this.mode === "read") return;
+        if (!this._editable() || this.mode === "read" || this._fixedRows()) return;
         if (this._editor) this._commitEdit(null);
         const rows = [];
         for (const r of rs) {
@@ -1621,10 +1622,12 @@
             items.push(this._menuItem("open-record", "document", t("data-grid.open-record", "Open record"), () => this._openRecord(this._cur.r)));
         }
         if (this._editable() && this.mode !== "read") {
-            items.push(this._menuItem("insert-row", "plus", t("data-grid.insert-row", "New row"), () => { this.addRow(); this.focus(); }));
+            const fixed = this._fixedRows();
+            if (!fixed) items.push(this._menuItem("insert-row", "plus", t("data-grid.insert-row", "New row"), () => { this.addRow(); this.focus(); }));
             const s = this._rect();
             const rs = [], dead = [];
-            for (let r = s.r1; r <= s.r2; r++) {
+            // Fixed rows: nothing to delete, nothing marked for deletion.
+            for (let r = s.r1; !fixed && r <= s.r2; r++) {
                 const row = this._rowAt(r);
                 if (!row) continue;
                 if (this._isDeleted(row)) dead.push(row); else rs.push(r);

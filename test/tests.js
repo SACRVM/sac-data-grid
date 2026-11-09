@@ -1967,4 +1967,77 @@ module.exports = function ({ test, eq, ok, center }) {
         await settle(p);
         eq(await p.eval("fx.grid.view.sort"), [{ field: "name", dir: "asc" }, { field: "n", dir: "asc" }]);
     });
+
+    /* ------------------------------------- fixed rows, host row menu items -- */
+
+    const menuActions = (p) => p.eval("[...fx.grid._menu.children].map((n) => n.tagName === 'HR' ? '-' : n.dataset.action + (n.disabled ? '(off)' : ''))");
+
+    test("rows=fixed: rows can be edited, but nothing adds or deletes them", async (p) => {
+        await p.load("/test/fixture.html?rows=5");
+        await p.eval("fx.grid.setAttribute('rows', 'fixed')");
+        await settle(p);
+        eq(await p.eval("[fx.state().rows, fx.grid._navRows()]"), [5, 5], "no new-row line");
+        eq(await p.eval("fx.grid.addRow({ name: 'x' })"), null, "addRow() adds nothing");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(5, 'w1')");
+        await p.key("ArrowDown");
+        eq((await p.eval("fx.state()")).cur.r, 4, "the cursor stops at the last row");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        const a = await menuActions(p);
+        ok(!a.includes("insert-row") && !a.includes("delete-rows") && a.includes("open-record") && a.includes("copy"), "no New / Delete in the row menu: " + a);
+        await p.key("Escape");
+        await p.eval("fx.grid._deleteRows([1])");
+        eq(await p.eval("[fx.grid._isDeleted(fx.grid._rowAt(1)), fx.events.filter((e) => e.type === 'sac:request-delete').length]"), [false, 0], "no delete, not even asked");
+        await p.eval("fx.pasteText('a\\nb\\nc')");
+        await settle(p);
+        eq([await shown(p, 4, "w1"), (await p.eval("fx.state()")).rows], ["a", 5], "a paste fills the rows there are");
+        eq((await toasts(p)).map((x) => x.text), ["Pasted 1 of 3 rows: the rest is past the last row."]);
+        await p.key("Delete");
+        await settle(p);
+        eq(await shown(p, 4, "w1"), "", "cells still clear");
+        await p.key("Enter", ["Shift"]);
+        await p.frames(3);
+        eq(await p.eval("[...fx.grid._formState.nav.querySelectorAll('button')].map((b) => b.textContent)"), ["Previous", "Next"], "the form has no New, no Delete");
+        await p.key("Escape");
+        await p.frames(3);
+        await p.eval("fx.grid.removeAttribute('rows')");
+        await settle(p);
+        eq(await p.eval("fx.grid._navRows()"), 6, "without it the new-row line is back");
+    });
+
+    test("rowMenu: the host's items come first and run with their row", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        await p.eval(`fx.grid.rowMenu = (row, info) => [
+            { id: "receipt", label: "Open receipt", icon: "document", onClick: (r, i) => { window.ran = [r.id, i.id, i.index, i.field, i.rows.length]; } },
+            "-",
+            { id: "only", label: "Only this one", labelKey: "test.only", disabled: info.id === 2 },
+        ]`);
+        await p.eval("sac.i18n.add('de', { 'test.only': 'Nur diese' })");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'name')");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        eq((await menuActions(p)).slice(0, 5), ["host:receipt", "-", "host:only", "-", "open-record"], "first, with separators");
+        await p.eval("fx.grid._menu.querySelector('[data-action=\"host:receipt\"]').click()");
+        await p.frames(2);
+        eq(await p.eval("window.ran"), [3, 3, 2, "name", 1], "runs with its row");
+        const c = await center(p, "fx.cellEl(1, 2)");
+        await rclick(p, c.x, c.y);
+        await p.frames(2);
+        eq((await menuActions(p)).slice(0, 3), ["host:receipt", "-", "host:only(off)"], "a right-click: that row's items");
+        await p.key("Escape");
+        await p.eval("sac.lang.set('de')");
+        await p.eval("fx.focusGrid()");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        eq(await p.eval("fx.grid._menu.querySelector('[data-action=\"host:only\"]').textContent.trim()"), "Nur diese", "labelKey");
+        await p.key("Escape");
+        await p.eval("sac.lang.set('en')");
+        await p.eval("fx.grid.rowMenu = () => { throw new Error('host bug'); }");
+        await p.eval("fx.focusGrid()");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        eq((await menuActions(p))[0], "open-record", "a failing hook leaves the grid's menu");
+        p.console = p.console.filter((m) => !/host bug/.test(m));
+        await p.key("Escape");
+    });
 };

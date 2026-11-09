@@ -59,7 +59,7 @@ host can show):
 | Rendering | Row virtualization (100k rows smooth; only visible rows + a small overscan in the DOM). Fixed header and fixed footer. Freeze N left columns (`frozen` on a column). |
 | Data | Pagination **or** incremental loading — one attribute switches (see §4). Sort (multi-column: Shift+click adds a key, as does the column menu's "Add to sort"). Per-column filter (type-aware: text contains, number/date range, select/tags "any of", bool). Active filters are never invisible: the status line names them (hidden columns' too; a name opens its filter) with "Clear filters", and a result the filters empty says so, with the same button. |
 | Columns | Resize by dragging the header edge (double-click = fit content). Show/hide columns (header menu). The column menu opens on a right-click (long press on touch, Alt+↓); there is no header button, so a title lines up with its values, and the sort mark sits above (ascending) or below (descending) the title. Column order fixed in v1. A header's tooltip says what a click and a right-click do; the grid's accessible description names Alt+↓ and Shift+F10. Widths/visibility/sort/filter reportable as a `view` object so a host can persist it. |
-| Editing | Inline, with the kit's editors per column type (§5). Row add (a "new row" line at the end, or `grid.addRow()`), row delete (with `sac.toast` Undo, in every save mode; the row menu restores a row marked for deletion). A change over several rows (clear, cut, paste, a bool flipped across rows) shows a toast saying what changed, with Undo. Batch mode's Discard stands apart from Save and is undone the same way. Dirty cells marked (subtle `--accent-warm` tint, never a thick border). Validation per column (`required`, `validate(value, row) → message|null`); invalid cells marked with `--danger`, message on hover/focus; text the column cannot read says what it takes ("– e.g. 25.09.2026"). The status line's "n rows with errors" goes to the next one. An edit the grid cannot make (read mode, form mode, a phone, a source without `save()`) says why, once per reason. |
+| Editing | Inline, with the kit's editors per column type (§5). Row add (a "new row" line at the end, or `grid.addRow()`), row delete (with `sac.toast` Undo, in every save mode; the row menu restores a row marked for deletion); `rows="fixed"` allows neither (§4). A change over several rows (clear, cut, paste, a bool flipped across rows) shows a toast saying what changed, with Undo. Batch mode's Discard stands apart from Save and is undone the same way. Dirty cells marked (subtle `--accent-warm` tint, never a thick border). Validation per column (`required`, `validate(value, row) → message|null`); invalid cells marked with `--danger`, message on hover/focus; text the column cannot read says what it takes ("– e.g. 25.09.2026"). The status line's "n rows with errors" goes to the next one. An edit the grid cannot make (read mode, form mode, a phone, a source without `save()`) says why, once per reason. |
 | Leaving | In cell and row save mode, unsaved rows are saved when the grid is removed from the page or the page hides. While rows are unsaved or saving, closing or reloading the page asks first (the browser's question); `unload-guard="off"` leaves that to the host. |
 | Selection | Cell cursor, rectangular range selection, whole row/column via headers, Ctrl+A. The row header is `row-header="marks"` (default: narrow, only a row's state), `"numbers"` (the position) or `"none"`. |
 | Clipboard | Copy / cut / paste as TSV — round-trips with Excel, Google Sheets, SharePoint. Paste into a range; paste larger than the selection extends from the cursor; values parsed per column type (dates/numbers via `sac.regional`); cells that fail validation are marked and not applied. Copy, cut, paste and clear load the range's rows first (up to 200 blocks). Nothing is dropped silently: what did not fit (past the page's end, past the last column, rows not loaded, read-only columns, invalid text) is reported in a toast; a copy that fails says so visibly, and never leaves the old clipboard to be pasted. |
@@ -131,6 +131,20 @@ changed — persist it if you like), `sac:load-error`.
 
 **Methods:** `reload()`, `save()`, `revert()`, `addRow(values?)`,
 `focusCell(id, field)`, `view` (get/set), `dirty` (read-only count).
+
+**Fixed rows** (`rows="fixed"`): the rows can be edited but not added or
+deleted, for rows that come from elsewhere (an import). No "new row" line,
+no New / Delete in the row menu or the record form, `addRow()` returns
+`null`, no `sac:request-delete`, and a paste fills only the rows there are
+(the rest is reported). Absent: rows can be added and deleted.
+
+**Host items in the row menu:** `grid.rowMenu = (row, info) → items`, with
+`info = { id, index, field, rows }` (`rows`: the loaded rows of the selected
+range) and items in the kit's `sac.contextMenu` shape: `{ id, label,
+labelKey?, icon?, danger?, disabled?, onClick(row, info) }`, or `"-"` for a
+separator. They come first, before the grid's own items, wherever the row
+menu opens (right-click, long press, Shift+F10 / the menu key). Called on
+every opening; a hook that throws leaves the grid's own menu.
 
 ## 5. Column types → kit editors (Decided)
 

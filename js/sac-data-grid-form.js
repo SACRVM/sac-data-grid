@@ -224,12 +224,14 @@
                 : t("data-grid.record", "Record {n}", { n: int(r + 1) }));
         // Delete is here as well as in the row menu (on a phone the form is
         // where a row is edited); it stands apart from Save, with Undo after.
-        const del = !st.readOnly ? btn("delete", "trash", t("data-grid.delete-record", "Delete"), false) : null;
+        // Fixed rows (rows="fixed"): neither New nor Delete.
+        const fixed = this._fixedRows();
+        const del = !st.readOnly && !fixed ? btn("delete", "trash", t("data-grid.delete-record", "Delete"), false) : null;
         if (del) del.classList.add("sdg-del");
         st.nav.replaceChildren(
             btn("prev", "chevron-left", t("data-grid.previous", "Previous"), r <= 0),
             btn("next", "chevron-right", t("data-grid.next", "Next"), r >= rows - 1, true),
-            ...(this._formEditable() ? [btn("new", "plus", t("data-grid.new", "New"), false)] : []),
+            ...(this._formEditable() && !fixed ? [btn("new", "plus", t("data-grid.new", "New"), false)] : []),
             pos,
             ...(del ? [del] : []),
         );
@@ -531,7 +533,7 @@
      *  then the Undo toast. A new record that was never saved just goes. */
     P._formDelete = function () {
         const st = this._formState;
-        if (!st || st.readOnly) return;
+        if (!st || st.readOnly || this._fixedRows()) return;
         const id = this._idOf(st.row);
         st.dlg.close("delete");
         const r = this._indexOfId(id);

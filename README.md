@@ -14,7 +14,8 @@ The binding specification is [`SPEC.md`](SPEC.md).
 - Excel-style keyboard, range selection, TSV copy / cut / paste (round-trips with Excel,
   Google Sheets and SharePoint), undo / redo.
 - Validation, dirty tracking, save per cell, per row or in batches; row add and delete with an
-  Undo toast; footer totals and selection stats.
+  Undo toast (or fixed rows, `rows="fixed"`); your own row-menu items (`grid.rowMenu`); footer
+  totals and selection stats.
 - Light / dark / per-app accent through tokens, EN / DE, live `sac.regional` formats, ARIA grid.
 
 Zero build: plain classic scripts, the kit vendored in `kit/` (needs **kit ≥ 2.22.0**).

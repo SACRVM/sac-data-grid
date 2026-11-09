@@ -44,6 +44,10 @@
  *   row-header — the column before the data: "marks" (default: narrow, it
  *                shows only a row's state: new, an error), "numbers" (the
  *                row's position, as in a spreadsheet) or "none".
+ *   rows       — "fixed": the rows can be edited but not added or deleted
+ *                (no new-row line, no New / Delete in the row menu or the
+ *                record form, addRow() returns null, a paste does not add
+ *                rows). Absent: rows can be added and deleted.
  *   unload-guard — "off": no "leave this page?" question from the grid
  *                while rows are unsaved (the host app asks itself). The
  *                grid saves unsaved rows when it is removed or the page
@@ -59,6 +63,11 @@
  *   view    — { columns: { field: { width, hidden } }, sort, filter }, get/set.
  *   mode    — get/set, mirrors the attribute.
  *   dirty   — read-only: the number of rows with unsaved changes.
+ *   rowMenu — optional (row, info) → [{ id, label, labelKey?, icon?,
+ *             danger?, disabled?, onClick(row, info) } | "-"]: the host's
+ *             own items, first in the row menu (right-click, long press,
+ *             Shift+F10 / the menu key). info: { id, index, field, rows }
+ *             (rows: the loaded rows of the selected range).
  *
  * Methods: reload(), save(), revert(), addRow(values?), focusCell(id, field).
  *
@@ -724,7 +733,7 @@
 
 class SacDataGrid extends HTMLElement {
     static get observedAttributes() {
-        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit", "row-header", "unload-guard"];
+        return ["mode", "save-mode", "paging", "page-size", "lines", "label", "mode-toggle", "compact-edit", "row-header", "unload-guard", "rows"];
     }
 
     constructor() {
@@ -834,6 +843,14 @@ class SacDataGrid extends HTMLElement {
             case "compact-edit":
                 this._stamp++;
                 this._scheduleRender();
+                break;
+            case "rows":
+                // The new-row line comes or goes; an open record's New and
+                // Delete follow.
+                this._clampSelection();
+                this._stamp++;
+                this._scheduleRender();
+                if (this._formState && this._formRefill) this._formRefill();
                 break;
             case "row-header":
                 this._layout();
@@ -2781,11 +2798,49 @@ class SacDataGrid extends HTMLElement {
         this._emitView();
     }
 
+    /** Rows can be added and deleted, unless rows="fixed". */
+    _fixedRows() { return this.getAttribute("rows") === "fixed"; }
+
+    /**
+     * The host's items for the row under the cursor (grid.rowMenu), as menu
+     * buttons, then a separator; [] without a hook or a row. "-" in the
+     * list is a separator; an item's onClick gets the row and the info.
+     */
+    _hostRowItems() {
+        if (typeof this.rowMenu !== "function") return [];
+        const r = this._cur.r, row = this._rowAt(r);
+        if (!row) return [];
+        const s = this._rect();
+        const rows = [];
+        for (let i = s.r1; i <= s.r2; i++) { const x = this._rowAt(i); if (x) rows.push(x); }
+        const col = this._cols[this._cur.c];
+        const info = { id: this._idOf(row), index: this._base() + r, field: col ? col.field : null, rows };
+        let list;
+        try { list = this.rowMenu(row, info); }
+        catch (err) { console.error("[sac-data-grid] rowMenu:", err); return []; }
+        if (!Array.isArray(list)) return [];
+        const out = [];
+        list.forEach((it, i) => {
+            if (it === "-") {
+                if (out.length && out[out.length - 1].tagName !== "HR") out.push(el("hr"));
+                return;
+            }
+            if (!it || it.label == null) return;
+            const label = it.labelKey ? t(it.labelKey, String(it.label)) : String(it.label);
+            out.push(this._menuItem("host:" + (it.id != null ? it.id : i), it.icon || null, label, () => {
+                if (typeof it.onClick !== "function") return;
+                try { it.onClick(row, info); } catch (err) { console.error("[sac-data-grid] rowMenu item:", err); }
+            }, { danger: !!it.danger, disabled: !!it.disabled }));
+        });
+        if (out.length && out[out.length - 1].tagName !== "HR") out.push(el("hr"));
+        return out;
+    }
+
     _openRowMenu(point) {
         const rows = this._rowCount();
         if (!rows) return;
         this._menuActions = {};
-        const items = this._rowMenuItems ? this._rowMenuItems() : [];
+        const items = [...this._hostRowItems(), ...(this._rowMenuItems ? this._rowMenuItems() : [])];
         items.push(this._menuItem("copy", "copy", t("data-grid.copy", "Copy"), () => this._copyToClipboard()));
         let pt = point;
         if (!pt) {
