@@ -253,10 +253,10 @@ question is added here with a provisional default and asked in an issue.
 | 3 | Look: spreadsheet-dense with cell grid lines, or quiet like kit lists (row lines only, cell outline on the cursor) | quiet; `lines="grid"` option |
 | 4 | Phones: editable or read-only | editable through the form dialog (bottom sheet), no inline editing |
 
-**Open (provisional, from the design-for-use review of 2026-11-09).** Built
-configurable or easy to change; to be confirmed by the owner in an issue.
+**Decided 2026-11-09, confirmed by the user** (from the design-for-use
+review of that day; no issue needed, the owner decided directly).
 
-| # | Question | Provisional default |
+| # | Question | Default |
 |---|---|---|
 | 5 | The browser's "leave this page?" question while rows are unsaved | on; `unload-guard="off"` turns it off |
 | 6 | When a change over a range gets a toast | a change in more than one row, and any change that left something out |
