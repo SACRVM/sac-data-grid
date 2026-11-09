@@ -1662,7 +1662,8 @@ module.exports = function ({ test, eq, ok, center }) {
             }
             return out;
         })()`);
-        eq(r.iso, ["2026-09-05", null, ""], "iso: ISO only");
+        // Kit ≥ 2.36 reads a dotted day-first date in ISO mode too.
+        eq(r.iso, ["2026-09-05", "2026-09-05", ""], "iso: ISO, and the dotted form");
         eq(r.dmy, ["2026-09-05", "2026-09-05", null, "05.09.2026"], "day first; no 31 February");
         eq(r.mdy, ["2026-09-05", "09/05/2026", "02:30 PM", "12:05 AM"], "month first; 12-hour clock");
         eq(r.time, ["14:00", "14:30", "09:05", "14:30", null, ""], "both cycles; a bare hour is not a time");

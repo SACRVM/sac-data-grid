@@ -121,13 +121,18 @@
  *                        a centered, slightly cascaded <sac-window> that stays
  *                        in the DOM and is re-open()ed on later calls.
  *                        Rejects on script load failure (console.error +
- *                        sac.toast if available).
+ *                        sac.toast if available — an error toast with a
+ *                        "Try again" action that repeats this open; not
+ *                        for an "integrity" failure, which retrying cannot
+ *                        fix).
  *                        kind:"view" does the same injection, then puts the
  *                        element on the shell's stage and sets the hash to
  *                        "#/<id>" — the address IS the open call, so a link
  *                        works as well as a click.
  *   close(id)            window: closes it (element + window stay in the DOM).
- *                        view: leaves the stage, back to the home section.
+ *                        view: leaves the stage, back to the home section. The
+ *                        address goes back to "#/" only while it still names
+ *                        the view; once it has moved on, it is left alone.
  *   remove(id)           unregister; if the app was created, calls its
  *                        unmount() (when present) and drops window or view.
  *                        Emits "sac:apps-changed".
@@ -141,6 +146,13 @@
  *                        replaceState, and — when any view app is registered —
  *                        routes the hash. Legacy compatibility: [data-overlay]
  *                        and ?tool= are honored the same way.
+ *                        options.tiles: false — no [data-app] click delegation
+ *                        (a shell that uses the attribute itself, or opens
+ *                        apps only from code). A hash that names no view (a
+ *                        sac.router page beside the views) parks the view on
+ *                        stage; it stays mounted for its next open. Recipe for
+ *                        views beside sac.router: the style guide, Helpers →
+ *                        sac.apps.
  *   inspect(url)         → Promise<manifest> — reads app.json, runs nothing.
  *                        Adds src, origin, manifestUrl and entryIntegrity
  *                        ("sha256-…" of the entry's bytes, or null when the
@@ -246,6 +258,13 @@
  *   box to measure.
  *   el.unmount() (if present) is called only by sac.apps.remove(). Apps that
  *   define neither still work — the contract is opt-in.
+ *   A mount() that throws (in-realm, or reported by an isolated app's
+ *   frame) never leaves an empty window or view: the window / view shows
+ *   an .empty-state — "“Name” couldn't start." with a Close button — in
+ *   the app's place (an in-realm element is swapped out, an isolated
+ *   frame hidden behind it). Close discards that instance, so the next
+ *   open() creates and mounts a fresh element. sac:app-error (kind
+ *   "mount") still fires, and open() still resolves.
  *
  *   context = {
  *       appId: "color-bucket",
@@ -336,14 +355,17 @@
  *   <sac-launcher> refreshes on). The stage also emits "view" (id = the app now
  *   on stage) and "home" (id = null, back at "#/"), so a host can track which
  *   view is showing.
- *   sac:app-error (on document, bubbles) — an app broke after it loaded.
- *   detail { appId, kind, message, source?, line?, column?, stack? }; kind is
- *   "mount" / "unmount" (the call threw — any app), or "error" / "rejection"
- *   (an uncaught exception / unhandled rejection inside an isolated frame;
- *   in-realm those are the page's own). Strings are capped (message 1000,
+ *   sac:app-error (on document, bubbles) — an app could not load, or broke
+ *   after it loaded. detail { appId, kind, message, code?, source?, line?,
+ *   column?, stack? }; kind is "load" (its script or frame did not start, or
+ *   it changed since it was installed — code "integrity"; the kit also toasts
+ *   it), "mount" / "unmount" (the call threw — any app; a mount failure
+ *   also shows in the app's window or view, see mount()), or "error" /
+ *   "rejection" (an uncaught exception / unhandled rejection inside an
+ *   isolated frame; in-realm those are the page's own). Strings are capped (message 1000,
  *   stack 4000) and each app may report 10 a second (burst 10) — a looping
  *   error cannot flood the host. `source` is set only when it lies in the
- *   app's own entry folder. Load failures still reject sac.apps.open().
+ *   app's own entry folder. Load failures also still reject sac.apps.open().
  */
 (function () {
     if (!window.sac) { console.warn("[sac.apps] globals.js must load first — app runtime unavailable."); return; }
@@ -367,6 +389,7 @@
     const viewOpening = new Map();// id  → in-flight view creation Promise
     let stackOffset = 0;          // cascade multiple open windows slightly
     let inited = false;
+    let tilesBound = false;       // the document-wide [data-app] click delegation
     let hashBound = false;
     let viewHost  = null;         // element the view elements live in
     let homeEl    = null;         // shown while no view is on stage ("#/")
@@ -995,8 +1018,10 @@
         errorBuckets.set(id, b);
         if (b.tokens < 1) return;
         b.tokens -= 1;
-        const i = info instanceof Error ? { message: info.message, stack: info.stack } : (info || {});
+        const i = info instanceof Error ? { message: info.message, stack: info.stack, code: info.code } : (info || {});
         const detail = { appId: id, kind, message: cap(String(i.message || ""), 1000) };
+        const code = cap(i.code, 40);
+        if (code) detail.code = code;
         const src = cap(i.source, 2000);
         if (src) detail.source = src;
         if (Number.isFinite(i.line)) detail.line = i.line;
@@ -1130,17 +1155,128 @@
             .then(() => whenDefinedTimeout(manifest.tag, manifest.src));
     }
 
-    /** The toast for a failed load — a changed pinned entry says so. */
-    function reportLoadFailure(manifest, err) {
-        console.error(`[sac.apps] ${err.message}`);
+    /** The toast for a failed load — a changed pinned entry says so. Any
+     *  other failure (a network hiccup, a server waking up) offers "Try
+     *  again", which runs `retry` — the same open once more (the failed
+     *  script was dropped from the load cache, so it is fetched anew). */
+    function reportLoadFailure(manifest, err, retry) {
+        // Some messages carry the prefix already — log it once, and hand the
+        // host the bare message.
+        const bare = String((err && err.message) || err).replace(/^\[sac\.apps\]\s*/, "");
+        console.error(`[sac.apps] ${bare}`);
+        // The host hears it too, like a mount or runtime failure — an open
+        // from an address (routeFromHash) has no caller to reject to.
+        reportError(manifest.id, "load", { message: bare, stack: err && err.stack, code: err && err.code });
         if (typeof sac.toast !== "function") return;
         if (err && err.code === "integrity") {
             sac.toast(`“${displayName(manifest)}” ` + sac.t("apps.changed",
                 "has changed since it was installed — update or remove it."), { kind: "error" });
         } else {
+            const action = typeof retry === "function"
+                ? { label: "Try again", labelKey: "apps.retry",
+                    onClick: () => { if (registry.has(manifest.id)) Promise.resolve(retry()).catch(() => {}); } }
+                : undefined;
             sac.toast(`“${displayName(manifest)}” ` + sac.t("apps.load-failed", "could not be loaded."),
-                { kind: "error" });
+                { kind: "error", action });
         }
+    }
+
+    /**
+     * mount() threw (in-realm, or reported over an isolated app's bridge):
+     * the window or view would otherwise stay empty. It shows why instead —
+     * an .empty-state "“X” couldn't start." with a Close that discards the
+     * broken instance, so the next open builds a fresh element and mounts
+     * it again. In-realm the app element is swapped for the message (the
+     * record keeps the message, so a re-open shows it again until Close);
+     * an isolated app's frame is hidden behind it.
+     */
+    function showStartFailure(id) {
+        const manifest = registry.get(id);
+        const win = windows.get(id);
+        const view = win ? null : views.get(id);
+        const rec = win || view;
+        if (!manifest || !rec || rec.failed) return;
+        rec.failed = true;
+
+        const panel = document.createElement("div");
+        panel.className = "empty-state sac-app-failed";
+        panel.setAttribute("role", "alert");
+        const icon = document.createElement("sac-icon");
+        icon.setAttribute("name", "error");
+        icon.setAttribute("aria-hidden", "true");
+        const title = document.createElement("h3");
+        const line = document.createElement("p");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn";
+        btn.addEventListener("click", () => discardFailed(id));
+        panel.append(icon, title, line, btn);
+        const label = () => {
+            title.textContent = sac.t("apps.start-failed", "“{name}” couldn't start.")
+                .replace("{name}", displayName(manifest));
+            line.textContent = sac.t("apps.start-failed-hint",
+                "Something went wrong inside the app as it started. Close it and open it again to try once more.");
+            btn.textContent = sac.t("apps.close", "Close");
+        };
+        label();
+        if (sac.lang) {
+            const off = sac.lang.onChange(() => { if (!panel.isConnected) { off(); return; } label(); });
+        }
+
+        // Fills its window or view, centred (.empty-state is a flex column).
+        panel.style.height = "100%";
+        panel.style.justifyContent = "center";
+        if (rec.bridge) {
+            // Isolated: the frame stays (the bridge owns it) behind the
+            // message — display, not [hidden]: the frame's inline style
+            // says display:block.
+            if (rec.bridge.frame) rec.bridge.frame.style.display = "none";
+            (win ? win.win : view.el).appendChild(panel);
+        } else if (win) {
+            win.el.replaceWith(panel);
+            win.el = panel;
+        } else {
+            // A view: the message takes the element's place on the stage, in
+            // a .sac-app-view shell (that class sets display:block, which
+            // would undo .empty-state's flex) — same hidden state, same
+            // accent seed.
+            const shell = document.createElement("div");
+            shell.className = "sac-app-view";
+            shell.hidden = view.el.hidden;
+            const seed = view.el.style.getPropertyValue("--accent");
+            if (seed) shell.style.setProperty("--accent", seed);
+            shell.appendChild(panel);
+            view.el.replaceWith(shell);
+            view.el = shell;
+        }
+        // Focus on the way out: a window about to open focuses its first
+        // control itself (sac-window); one already showing, or a view on
+        // stage, gets it here.
+        if (win ? win.win.hasAttribute("open") : !view.el.hidden) btn.focus({ preventScroll: true });
+    }
+
+    /** Close on a start failure: the broken instance goes (window or view,
+     *  its frame with it), so the next open() starts fresh. */
+    function discardFailed(id) {
+        launchCbs.delete(id);
+        setDirty(id, false);
+        const win = windows.get(id);
+        if (win) {
+            windows.delete(id);
+            if (win.bridge) win.bridge.dispose(() => win.win.remove());
+            else {
+                // Let the window close the way it closes, then drop it.
+                win.win.close();
+                setTimeout(() => win.win.remove(), 400);
+            }
+            return;
+        }
+        const view = views.get(id);
+        if (!view) return;
+        views.delete(id);
+        if (view.bridge) view.bridge.dispose(() => view.el.remove());
+        else view.el.remove();
+        if (activeId === id) leaveView(id);
     }
 
     /* ------------------------------------------------------------ views -- */
@@ -1190,6 +1326,7 @@
                 catch (err) {
                     console.error(`[sac.apps] ${id}.mount() threw:`, err);
                     reportError(id, "mount", err);
+                    showStartFailure(id);
                 }
             }
             rec.params = null;
@@ -1252,7 +1389,7 @@
         try {
             await ensureDefined(manifest);
         } catch (err) {
-            reportLoadFailure(manifest, err);
+            reportLoadFailure(manifest, err, () => open(id, params, { route, accent, files }));
             throw err;
         }
         if (!registry.has(id)) throw new Error(`[sac.apps] app removed while loading: ${id}`);
@@ -1305,7 +1442,7 @@
             bridge = await startFrame(manifest, wrap, wrap);
         } catch (err) {
             wrap.remove();
-            reportLoadFailure(manifest, err);
+            reportLoadFailure(manifest, err, () => open(id, params, { route, accent, files }));
             throw err;
         }
         if (!registry.has(id)) {
@@ -1362,7 +1499,10 @@
             frameUrl: sac.apps.frameUrl,
             limits:   sac.apps.limits,
             classify: classifyLoadFailure,
-            onError:  (kind, info) => reportError(manifest.id, kind, info),
+            onError:  (kind, info) => {
+                reportError(manifest.id, kind, info);
+                if (kind === "mount") showStartFailure(manifest.id);
+            },
             appError,
         });
         try {
@@ -1388,7 +1528,13 @@
             return;
         }
         const manifest = registry.get(parsed.id);
-        if (!manifest || manifest.kind !== "view") return;
+        if (!manifest || manifest.kind !== "view") {
+            // The address names no view — another page of the shell (a
+            // sac.router route beside the views): the view on stage steps
+            // aside, kept for its next open.
+            if (activeId) goHome();
+            return;
+        }
         if (activeId === parsed.id) { deliverRoute(parsed.id, parsed.route); return; }
         openView(manifest, parsed.route).catch(() => {});
     }
@@ -1446,7 +1592,7 @@
         try {
             await ensureDefined(manifest);
         } catch (err) {
-            reportLoadFailure(manifest, err);
+            reportLoadFailure(manifest, err, () => open(id, params, opts));
             throw err;
         }
         if (!registry.has(id)) throw new Error(`[sac.apps] app removed while loading: ${id}`);
@@ -1460,11 +1606,13 @@
 
         // mount(context): exactly once per element lifetime, right after the
         // element lands in the document. Opt-in — apps without mount() work.
+        // A throw leaves no empty window: the message takes the app's place.
         if (typeof el.mount === "function") {
             try { el.mount(makeContext(manifest, params, o.files)); }
             catch (err) {
                 console.error(`[sac.apps] ${id}.mount() threw:`, err);
                 reportError(id, "mount", err);
+                showStartFailure(id);
             }
         }
 
@@ -1487,7 +1635,7 @@
             bridge = await startFrame(manifest, win, win);
         } catch (err) {
             win.remove();
-            reportLoadFailure(manifest, err);
+            reportLoadFailure(manifest, err, () => open(id, params, { accent, files }));
             throw err;
         }
         if (!registry.has(id)) {
@@ -1547,10 +1695,19 @@
 
     /* ------------------------------------------------- close / remove ---- */
 
+    /** A view leaves the stage. Back to the home address only while the
+     *  address still names it — once it has moved on (the user went to
+     *  another page of the shell), it stays where it is. */
+    function leaveView(id) {
+        const parsed = parseHash();
+        if (parsed && parsed.id === id) replaceHash(scopedHash("#/"));
+        goHome();
+    }
+
     function close(id) {
         const manifest = registry.get(id);
         if (manifest && manifest.kind === "view") {
-            if (activeId === id) { replaceHash(scopedHash("#/")); goHome(); }
+            if (activeId === id) leaveView(id);
             return;
         }
         const rec = windows.get(id);
@@ -1584,7 +1741,7 @@
             if (view.bridge) view.bridge.dispose(() => view.el.remove());
             else { unmountEl(id, view.el); view.el.remove(); }
             views.delete(id);
-            if (activeId === id) { replaceHash(scopedHash("#/")); goHome(); }
+            if (activeId === id) leaveView(id);
         }
         emitChanged(id, "remove");
     }
@@ -1750,8 +1907,12 @@
         }
         if (!baseTitle) baseTitle = document.title;
 
-        if (!inited) {
-            inited = true;
+        if (!inited) inited = true;
+        // init({ tiles: false }): no click delegation — a shell that uses
+        // [data-app] for something of its own (or opens apps only from code)
+        // keeps its clicks. A later init() without it binds it then.
+        if (!tilesBound && opts.tiles !== false) {
+            tilesBound = true;
             // Tiles: [data-app="<id>"] opens that app. Delegated, so tiles
             // rendered after init() work too. [data-overlay] is the legacy
             // spelling — same behavior. A hand-written tile is a full tile:
