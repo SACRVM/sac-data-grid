@@ -1238,6 +1238,32 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(await p.eval("[fx.source.rows.length, fx.source.rows[10].name]"), [11, "Newbie"], "created");
     });
 
+    test("form: a kit field's invalid text holds the save (validationMessage)", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        const f = "fx.grid._formState.fields[2]";                 // Num: a sac-number-field
+        await p.eval(`${f}.focus.focus()`);
+        await p.key("a", ["Control"]);
+        await p.type("abc");
+        await p.key("Enter", ["Control"]);
+        await settle(p);
+        ok(await dialogOpen(p), "stays open");
+        eq(await saves(p), [], "nothing saved");
+        eq(await p.eval("fx.data[1].n"), 3.7, "the row keeps its value");
+        ok(await p.eval(`!!${f}.focus.validationMessage`), "the field reports its text");
+        ok(await p.eval(`fx.deepActive() === ${f}.focus.shadowRoot.querySelector("input")`), "focus on the field");
+        eq(await p.eval(`${f}.err.textContent`), "", "no second line: the kit field shows its own");
+        ok(await p.eval(`${f}.focus.shadowRoot.querySelector("[part~=error]").textContent.length > 0`), "the field's line says what it expects");
+        await p.key("a", ["Control"]);
+        await p.type("12.5");
+        await p.key("Enter", ["Control"]);
+        await settle(p);
+        ok(!(await dialogOpen(p)), "saves once fixed");
+        eq(await p.eval("fx.data[1].n"), 12.5);
+    });
+
     test("read mode opens the record read-only", async (p) => {
         await p.load("/test/fixture.html?rows=5&mode=read");
         await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'name')");

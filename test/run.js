@@ -116,6 +116,11 @@ const KEYS = {
     Enter: [13, "Enter"], Escape: [27, "Escape"], Backspace: [8, "Backspace"], Delete: [46, "Delete"],
     F2: [113, "F2"], F10: [121, "F10"], " ": [32, "Space"], ContextMenu: [93, "ContextMenu"],
 };
+/** Punctuation's own key codes: its char code would name another key ("." is 46, Delete). */
+const PUNCT = {
+    ".": [190, "Period"], ",": [188, "Comma"], "-": [189, "Minus"], "/": [191, "Slash"], ":": [186, "Semicolon"],
+    ";": [186, "Semicolon"], "'": [222, "Quote"], "+": [187, "Equal"], "=": [187, "Equal"],
+};
 const MODS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 
 class Page {
@@ -158,6 +163,7 @@ class Page {
             const up = key.toUpperCase();
             vk = up.charCodeAt(0);
             code = /[a-z]/i.test(key) ? "Key" + up : (/\d/.test(key) ? "Digit" + key : "");
+            if (PUNCT[key]) [vk, code] = PUNCT[key];
             text = key;
         } else throw new Error("unknown key " + key);
         if (modifiers & (MODS.Control | MODS.Meta | MODS.Alt)) text = undefined;

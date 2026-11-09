@@ -207,6 +207,17 @@ kit it keeps the earlier behaviour (fallback values, a timed removal):
 - Press states: the grid's own buttons, pager and filter options answer on
   pointer-down, like the kit's controls.
 
+**Kit 2.36** adds what the record form relies on when it is there:
+
+- `validationMessage` on the number, date, time and colour fields: a
+  form-size field keeps text it cannot take and shows what it expects under
+  itself, while `value` stays the last valid value. The record form reads it
+  before saving: while any field holds such text, nothing is saved and the
+  first one takes focus (its own line explains; the form adds no second
+  one). An older kit has no such property and reverts the text itself.
+- The kit's `.field-error` line: the form's own messages (required,
+  `validate`, save errors) use it, always in the page and announced politely.
+
 If a gap in the kit shows up: open an issue on SACRVM/sacrvm-appkit instead
 of working around it inside the grid.
 
