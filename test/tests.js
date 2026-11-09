@@ -1321,6 +1321,14 @@ module.exports = function ({ test, eq, ok, center }) {
             await p.frames(3);
             ok(await dialogOpen(p), "a tap on the active cell opens it");
             await p.key("Escape");
+            await p.frames(3);
+            const other = await center(p, "fx.cellEl(2, 1)");
+            await p.click(other.x, other.y);
+            await p.frames(3);
+            ok(await dialogOpen(p), "so does a single tap on another row");
+            eq(await p.eval("document.querySelector('sac-dialog[open]:not([closing])').getAttribute('title')"), "Clara 3");
+            await p.key("Escape");
+            await p.frames(3);
             await p.eval("fx.grid.setAttribute('compact-edit', 'read')");
             await p.key("Enter");
             await p.frames(3);
@@ -1584,7 +1592,7 @@ module.exports = function ({ test, eq, ok, center }) {
         await p.load("/test/fixture.html?rows=5&mode=read");
         await p.eval(`fx.grid.view = { filter: { name: { op: "contains", value: "nobody" } } }`);
         await settle(p);
-        eq(await p.eval("fx.note()"), "No rows");
+        eq(await p.eval("fx.note()"), "No rows match the filters.Clear filters", "filters, not an empty table");
         ok(await p.eval("fx.grid._scroller.classList.contains('empty')"), "empty class for the focus ring");
     });
     test("row mode saves the row when focus leaves the grid", async (p) => {
@@ -1695,5 +1703,268 @@ module.exports = function ({ test, eq, ok, center }) {
         eq(r.time, ["14:00", "14:30", "09:05", "14:30", null, ""], "both cycles; a bare hour is not a time");
         eq(r.dt, ["2026-09-25T14:30", "2026-09-25T00:00", "2026-09-25T14:30", null], "datetimes");
         eq(r.dt2, ["2026-09-25T14:30", "25.09.2026 14:30"], "spaces inside the date");
+    });
+
+    /* ------------------------------------------- design-for-use (2026-11) -- */
+
+    const W1 = "fx.grid._cols.find((c) => c.field === 'w1')";
+    const shown = (p, r, field) => p.eval(`fx.grid._get(fx.grid._rowAt(${r}), fx.grid._cols.find((c) => c.field === '${field}'))`);
+    const toasts = (p) => p.eval("fx.toasts()");
+
+    test("bulk clear in row mode: saved at once, still undoable, with an Undo toast", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        for (let i = 0; i < 3; i++) await p.key("ArrowDown", ["Shift"]);
+        await p.key("Delete");
+        await settle(p);
+        eq(await p.eval("[fx.data[2].w1, fx.data[3].w1, fx.data[4].w1]"), ["", "", ""], "the rows the cursor is not in are saved");
+        const tt = await toasts(p);
+        eq(tt.map((x) => [x.text, x.action]), [["4 cells cleared.", "Undo"]], "a toast says so, with Undo");
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await p.eval("[fx.data[2].w1, fx.data[3].w1, fx.data[4].w1]"), ["wide 2", "wide 3", "wide 4"], "undo writes the old values back and saves them");
+        eq([await shown(p, 1, "w1"), await shown(p, 4, "w1")], ["wide 1", "wide 4"], "every cell shows its old value");
+        await p.key("y", ["Control"]);
+        await settle(p);
+        eq(await shown(p, 2, "w1"), "", "redo clears again");
+        ok(await p.eval("fx.toastAction('cells cleared')"), "the toast's Undo");
+        await settle(p);
+        eq(await p.eval("fx.data[3].w1"), "wide 3", "the toast's Undo takes it back");
+    });
+
+    test("paste says what did not fit: past the page's end, past the last column", async (p) => {
+        await p.load("/test/fixture.html?rows=30&paging=pages&page-size=10&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(8, 'w2')");
+        await p.eval("fx.pasteText('a1\\tb1\\tc1\\na2\\tb2\\tc2\\na3\\tb3\\tc3\\na4\\tb4\\tc4\\na5\\tb5\\tc5')");
+        await settle(p);
+        eq([await shown(p, 7, "w2"), await shown(p, 9, "w3")], ["a1", "b3"], "what fits lands");
+        const tt = await toasts(p);
+        eq(tt.length, 1, "one toast");
+        eq(tt[0].kind, "warn");
+        eq(tt[0].text, "Pasted 3 of 5 rows: the rest is past the end of this page. 1 column was left out: it is past the last column.");
+        eq(tt[0].action, "Undo");
+    });
+
+    test("paste loads the rows it lands on first", async (p) => {
+        await p.load("/test/fixture.html?rows=300&source=server&save-mode=batch");
+        await settle(p);
+        eq((await p.eval("fx.state()")).rows, 100, "one block known (total unknown)");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(1, 'w1')");
+        const lines = Array.from({ length: 150 }, (_, i) => "p" + i).join("\\n");
+        await p.eval(`fx.pasteText("${lines}")`);
+        await p.eval("new Promise((r) => setTimeout(r, 300))");
+        await settle(p);
+        eq([await shown(p, 0, "w1"), await shown(p, 149, "w1")], ["p0", "p149"], "all 150 rows, the unloaded ones too");
+        eq((await toasts(p)).map((x) => x.text), ["150 cells pasted."]);
+    });
+
+    test("copy waits for rows still loading, never leaves the old clipboard", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'name')");
+        await p.key("ArrowDown", ["Shift"]);
+        await p.key("ArrowDown", ["Shift"]);
+        const r = await p.eval(`(async () => {
+            fx.grid._blocks.delete(0);                 // as if the rows were still loading
+            const dt = new DataTransfer();
+            dt.setData("text/plain", "OLD");
+            const e = new ClipboardEvent("copy", { clipboardData: dt, bubbles: true, cancelable: true });
+            document.dispatchEvent(e);
+            const now = dt.getData("text/plain");
+            await new Promise((done) => setTimeout(done, 300));
+            return { prevented: e.defaultPrevented, now, clip: await navigator.clipboard.readText() };
+        })()`);
+        eq([r.prevented, r.now], [true, ""], "the browser's copy does not keep the old text");
+        eq(r.clip, "Ben 2\r\nClara 3\r\nDavid 4", "copied once loaded");
+        eq((await toasts(p)).map((x) => x.text), ["3 rows copied."], "and says when it is ready");
+    });
+
+    test("batch Discard stands apart from Save and can be undone", async (p) => {
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        await p.eval(`fx.grid._applyChanges([0, 1, 2].map((r) => ({ row: fx.grid._rowAt(r), col: ${W1}, value: "x" + r })), true)`);
+        await settle(p);
+        eq(await p.eval("[...fx.grid.shadowRoot.querySelector('.extra').children].map((n) => n.textContent)"), ["Discard", "3 unsaved rows", "Save"]);
+        await p.eval("fx.grid.shadowRoot.querySelector('.extra .btn:not(.primary)').click()");
+        await settle(p);
+        eq(await p.eval("fx.grid.dirty"), 0, "discarded");
+        eq((await toasts(p)).map((x) => [x.text, x.action]), [["Changes in 3 rows discarded.", "Undo"]]);
+        await p.eval("fx.focusGrid()");
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await p.eval("fx.grid.dirty"), 3, "Ctrl+Z brings them back");
+        eq(await shown(p, 2, "w1"), "x2");
+        await p.key("z", ["Control"]);
+        await settle(p);
+        eq(await shown(p, 2, "w1"), "wide 2", "the edits before the discard undo as before");
+    });
+
+    test("active filters show in the status line, a hidden column's too", async (p) => {
+        await p.load("/test/fixture.html?rows=20");
+        await p.eval(`fx.grid.view = { filter: { name: { op: "contains", value: "Anna" } } }`);
+        await settle(p);
+        await p.eval("fx.grid._setHidden('name', true)");
+        await settle(p);
+        eq(await p.eval("[...fx.grid.shadowRoot.querySelector('.filters').children].map((n) => n.textContent)"), ["Filtered:", "Name", "Clear filters"], "named, with Clear filters");
+        await p.eval("fx.grid.shadowRoot.querySelector('.filters .link').click()");
+        await p.frames(2);
+        ok(await p.eval("fx.grid._pop.matches(':popover-open')"), "the name opens that column's filter");
+        await p.eval("fx.grid.shadowRoot.querySelector('.filters .btn').click()");
+        await settle(p);
+        eq(await p.eval("[JSON.stringify(fx.grid.view.filter), fx.state().rows]"), ["{}", 20], "cleared");
+        eq(await p.eval("fx.grid.shadowRoot.querySelector('.filters').hidden"), true);
+    });
+
+    test("long text: the footer says how to finish; Escape keeps the draft for Ctrl+Z", async (p) => {
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'note')");
+        await p.key("Enter");
+        eq(await p.eval("[...fx.grid._editor.pop.querySelectorAll('.long-foot button')].map((b) => b.textContent)"), ["Cancel", "Done (Ctrl+Enter)"]);
+        await p.type("xyz");
+        await p.key("Escape");
+        eq((await p.eval("fx.state()")).editing, false, "Escape closes it");
+        eq(await shown(p, 1, "note"), "note 1", "the value is unchanged");
+        eq((await toasts(p)).map((x) => [x.text, x.action]), [["Text discarded.", "Undo"]]);
+        await p.key("z", ["Control"]);
+        ok((await p.eval("fx.state()")).editing, "Ctrl+Z opens it again");
+        eq(await p.eval("fx.grid._editor.el.value"), "note 1xyz", "with the draft");
+        await p.key("Enter", ["Control"]);
+        eq(await shown(p, 1, "note"), "note 1xyz", "Ctrl+Enter commits");
+        await p.eval("fx.grid.focusCell(3, 'note')");
+        await p.key("Enter");
+        await p.type("q");
+        await p.eval("fx.grid._editor.pop.querySelector('.long-foot .primary').click()");
+        eq(await shown(p, 2, "note"), "note 2q", "Done commits");
+    });
+
+    test("unsaved rows: leaving the page asks first, unless unload-guard=off", async (p) => {
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        await p.type("abc");
+        await p.key("Enter");
+        await settle(p);
+        ok(await p.eval("fx.grid._guarded"), "guarded while dirty");
+        p.leaveAsked = 0;
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        eq(p.leaveAsked, 1, "the browser asked before leaving");
+        await p.eval("fx.grid.setAttribute('unload-guard', 'off'); fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        await p.type("abc");
+        await p.key("Enter");
+        await settle(p);
+        ok(!(await p.eval("fx.grid._guarded")), "not with unload-guard=off");
+        await p.load("/test/fixture.html?rows=10");
+        eq(p.leaveAsked, 1, "no question");
+    });
+
+    test("row mode: a grid taken out of the page saves its unsaved row", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'w1')");
+        await p.type("abc");
+        await p.key("Tab");                           // commit, stay in the row
+        await settle(p);
+        eq(await saves(p), [], "still in the row: not saved yet");
+        await p.eval("fx.grid.remove()");
+        await p.eval("new Promise((r) => setTimeout(r, 50))");
+        eq(await p.eval("fx.data[1].w1"), "abc", "saved on the way out");
+    });
+
+    test("form: Delete deletes the record, with the Undo toast", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'name')");
+        await p.key("Enter");
+        await p.frames(3);
+        eq(await p.eval("fx.grid._formState.nav.querySelector('.sdg-del').textContent"), "Delete");
+        await p.eval("fx.grid._formState.nav.querySelector('.sdg-del').click()");
+        await settle(p);
+        ok(!(await dialogOpen(p)), "the form closes");
+        ok(await p.eval("fx.grid._isDeleted(fx.grid._rowAt(2))"), "the row is marked");
+        eq((await toasts(p)).map((x) => [x.text, x.action]), [["1 row deleted", "Undo"]]);
+        ok(await p.eval("fx.toastAction('row deleted')"));
+        await settle(p);
+        ok(!(await p.eval("fx.grid._isDeleted(fx.grid._rowAt(2))")), "Undo keeps it");
+    });
+
+    test("the status line's error count goes to the next row with errors", async (p) => {
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        await p.eval(`(() => {
+            const col = fx.grid._cols.find((c) => c.field === "name");
+            fx.grid._applyChanges([3, 6].map((r) => ({ row: fx.grid._rowAt(r), col, value: "" })), true);
+        })()`);
+        await settle(p);
+        const err = "fx.grid.shadowRoot.querySelector('.extra .link.err')";
+        eq(await p.eval(`${err}.textContent`), "2 rows with errors");
+        await p.eval(`${err}.click()`);
+        await p.frames(2);
+        eq((await p.eval("fx.state()")).cur, { r: 3, c: 1 }, "the first one, on its marked cell");
+        await p.eval(`${err}.click()`);
+        await p.frames(2);
+        eq((await p.eval("fx.state()")).cur, { r: 6, c: 1 }, "then the next");
+        await p.eval(`${err}.click()`);
+        await p.frames(2);
+        eq((await p.eval("fx.state()")).cur.r, 3, "and round again");
+    });
+
+    test("row menu: Undo, Redo, and Restore for a row marked for deletion", async (p) => {
+        await p.load("/test/fixture.html?rows=10&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(3, 'w1')");
+        await p.eval("fx.grid._deleteRows([2])");
+        await settle(p);
+        const actions = () => p.eval("[...fx.grid._menu.querySelectorAll('button')].map((b) => b.dataset.action)");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        const a = await actions();
+        ok(a.includes("restore-rows") && a.includes("undo") && !a.includes("delete-rows"), "restore and undo offered: " + a);
+        await p.eval("fx.grid._menu.querySelector('[data-action=restore-rows]').click()");
+        await settle(p);
+        ok(!(await p.eval("fx.grid._isDeleted(fx.grid._rowAt(2))")), "restored");
+        await p.eval(`fx.grid._applyChanges([{ row: fx.grid._rowAt(2), col: ${W1}, value: "u" }], true)`);
+        await p.eval("fx.focusGrid()");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        await p.eval("fx.grid._menu.querySelector('[data-action=undo]').click()");
+        await settle(p);
+        eq(await shown(p, 2, "w1"), "wide 2", "the menu's Undo");
+        await p.key("F10", ["Shift"]);
+        await p.frames(2);
+        ok((await actions()).includes("redo"), "then Redo");
+        await p.key("Escape");
+    });
+
+    test("an edit the grid cannot make says why, once", async (p) => {
+        await p.load("/test/fixture.html?rows=5&mode=read");
+        await p.eval("fx.focusGrid()");
+        await p.type("x");
+        await p.key("Delete");
+        await p.eval("fx.pasteText('y')");
+        await p.frames(2);
+        eq((await toasts(p)).map((x) => x.text), ["This table is read-only."]);
+        await p.load("/test/fixture.html?rows=5&mode=form");
+        await p.eval("fx.focusGrid()");
+        await p.type("x");
+        await p.frames(2);
+        eq((await toasts(p)).map((x) => x.text), ["Press Enter to edit this row in a form."]);
+    });
+
+    test("invalid text says what the column takes; plurals for one row", async (p) => {
+        await p.load("/test/fixture.html?rows=5&save-mode=batch");
+        await p.eval("fx.focusGrid(); fx.grid.focusCell(2, 'd')");
+        await p.eval("fx.pasteText('2026/28/09')");
+        await settle(p);
+        eq(await p.eval("fx.grid._entryOf(fx.grid._rowAt(1)).errors.d"), "Not a valid value: 2026/28/09 – e.g. 2026-09-25");
+        await p.eval(`fx.grid._applyChanges([{ row: fx.grid._rowAt(3), col: fx.grid._cols.find((c) => c.field === "name"), value: "" }], true)`);
+        await p.eval("fx.grid.save()");
+        await p.frames(3);
+        eq(await p.eval("fx.grid._live.textContent"), "Fix the marked cells: 1 row was not saved.");
+    });
+
+    test("headers say what a click and a right-click do; the menu can add a sort key", async (p) => {
+        await p.load("/test/fixture.html?rows=10");
+        eq(await p.eval("fx.header(1).title"), "Name\nClick to sort, Shift+click to add · Right-click for filter and columns");
+        ok((await p.eval("fx.grid._scroller.getAttribute('aria-description')")).includes("Alt+Down"), "the keys, for screen readers");
+        await p.eval("fx.grid._setSort([{ field: 'name', dir: 'asc' }])");
+        await p.eval("fx.grid._openColumnMenu(2)");
+        await p.frames(2);
+        ok(await p.eval("!!fx.grid._menu.querySelector('[data-action=sort-add]')"), "Add to sort");
+        await p.eval("fx.grid._menu.querySelector('[data-action=sort-add]').click()");
+        await settle(p);
+        eq(await p.eval("fx.grid.view.sort"), [{ field: "name", dir: "asc" }, { field: "n", dir: "asc" }]);
     });
 };

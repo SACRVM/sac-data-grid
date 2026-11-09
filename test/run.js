@@ -266,6 +266,12 @@ require(process.env.TESTS ? path.resolve(process.env.TESTS) : "./tests.js")({ te
             const d = msg.params.exceptionDetails;
             page.console.push("exception: " + ((d.exception && d.exception.description) || d.text));
         }
+        // A page left with unsaved rows asks before it goes (the grid's
+        // unload guard): leave anyway, and count it for the tests that ask.
+        if (msg.method === "Page.javascriptDialogOpening") {
+            if (msg.params.type === "beforeunload") page.leaveAsked = (page.leaveAsked || 0) + 1;
+            page.send("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+        }
     });
 
     let pass = 0, fail = 0;

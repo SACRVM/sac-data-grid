@@ -19,7 +19,10 @@ GitHub issue in this repo) before treating the default as final.
 - It **consumes the vendored SACRVM APPKIT** (`kit/`, the release ZIP dropped
   in verbatim) and requires **kit ≥ 2.22.0** — 2.21.0 ships the cell editors
   this grid needs, 2.22.0 the date / time helpers and the dialog, menu and
-  chip-input fixes it builds on (see §6). It never copies kit code.
+  chip-input fixes it builds on (see §6). It never copies kit code. Besides
+  the components it needs `lib/context-menu.js` (in `kit/js/all.js`): the
+  row menu answers `contextmenu`, which iOS sends on a long press only
+  through it.
 - API page `index.html` (GitHub Pages, in the kit's showcase look) with a
   live demo: a 100k-row array source, a paged "server" source
   (a fake async source with latency), every column type, frozen columns,
@@ -45,19 +48,22 @@ host can show):
 - The same validation, dirty tracking, `save-mode` and `source.save()` path
   apply in every mode. The form commits one record (one `changes` entry).
 - On phones the form dialog (a bottom sheet) is the way to edit, whatever the
-  mode (see §7-4).
+  mode (see §7-4): a tap on a row opens it.
+- The form also deletes its record (Delete, apart from Save; the row goes
+  the grid's way: `sac:request-delete`, then the Undo toast).
 
 ## 2b. Features — v1 (Decided)
 
 | Area | v1 |
 |---|---|
 | Rendering | Row virtualization (100k rows smooth; only visible rows + a small overscan in the DOM). Fixed header and fixed footer. Freeze N left columns (`frozen` on a column). |
-| Data | Pagination **or** incremental loading — one attribute switches (see §4). Sort (multi-column: Shift+click adds a key). Per-column filter (type-aware: text contains, number/date range, select/tags "any of", bool). |
-| Columns | Resize by dragging the header edge (double-click = fit content). Show/hide columns (header menu). The column menu opens on a right-click (long press on touch, Alt+↓); there is no header button, so a title lines up with its values, and the sort mark sits above (ascending) or below (descending) the title. Column order fixed in v1. Widths/visibility/sort/filter reportable as a `view` object so a host can persist it. |
-| Editing | Inline, with the kit's editors per column type (§5). Row add (a "new row" line at the end, or `grid.addRow()`), row delete (with `sac.toast` Undo). Dirty cells marked (subtle `--accent-warm` tint, never a thick border). Validation per column (`required`, `validate(value, row) → message|null`); invalid cells marked with `--danger`, message on hover/focus. |
+| Data | Pagination **or** incremental loading — one attribute switches (see §4). Sort (multi-column: Shift+click adds a key, as does the column menu's "Add to sort"). Per-column filter (type-aware: text contains, number/date range, select/tags "any of", bool). Active filters are never invisible: the status line names them (hidden columns' too; a name opens its filter) with "Clear filters", and a result the filters empty says so, with the same button. |
+| Columns | Resize by dragging the header edge (double-click = fit content). Show/hide columns (header menu). The column menu opens on a right-click (long press on touch, Alt+↓); there is no header button, so a title lines up with its values, and the sort mark sits above (ascending) or below (descending) the title. Column order fixed in v1. A header's tooltip says what a click and a right-click do; the grid's accessible description names Alt+↓ and Shift+F10. Widths/visibility/sort/filter reportable as a `view` object so a host can persist it. |
+| Editing | Inline, with the kit's editors per column type (§5). Row add (a "new row" line at the end, or `grid.addRow()`), row delete (with `sac.toast` Undo, in every save mode; the row menu restores a row marked for deletion). A change over several rows (clear, cut, paste, a bool flipped across rows) shows a toast saying what changed, with Undo. Batch mode's Discard stands apart from Save and is undone the same way. Dirty cells marked (subtle `--accent-warm` tint, never a thick border). Validation per column (`required`, `validate(value, row) → message|null`); invalid cells marked with `--danger`, message on hover/focus; text the column cannot read says what it takes ("– e.g. 25.09.2026"). The status line's "n rows with errors" goes to the next one. An edit the grid cannot make (read mode, form mode, a phone, a source without `save()`) says why, once per reason. |
+| Leaving | In cell and row save mode, unsaved rows are saved when the grid is removed from the page or the page hides. While rows are unsaved or saving, closing or reloading the page asks first (the browser's question); `unload-guard="off"` leaves that to the host. |
 | Selection | Cell cursor, rectangular range selection, whole row/column via headers, Ctrl+A. The row header is `row-header="marks"` (default: narrow, only a row's state), `"numbers"` (the position) or `"none"`. |
-| Clipboard | Copy / cut / paste as TSV — round-trips with Excel, Google Sheets, SharePoint. Paste into a range; paste larger than the selection extends from the cursor; values parsed per column type (dates/numbers via `sac.regional`); cells that fail validation are marked and not applied. |
-| Undo | Ctrl+Z / Ctrl+Y over every edit, paste, fill, row add/delete — until saved. |
+| Clipboard | Copy / cut / paste as TSV — round-trips with Excel, Google Sheets, SharePoint. Paste into a range; paste larger than the selection extends from the cursor; values parsed per column type (dates/numbers via `sac.regional`); cells that fail validation are marked and not applied. Copy, cut, paste and clear load the range's rows first (up to 200 blocks). Nothing is dropped silently: what did not fit (past the page's end, past the last column, rows not loaded, read-only columns, invalid text) is reported in a toast; a copy that fails says so visibly, and never leaves the old clipboard to be pasted. |
+| Undo | Ctrl+Z / Ctrl+Y (and Undo / Redo in the row menu) over every edit, paste, fill, row add/delete. A saved cell change stays undoable: undo writes the old value back as a new change, saved like any other. A saved new row or a row the source removed cannot be taken back (a delete waits behind its Undo toast first). A long text thrown away with Escape comes back with Ctrl+Z. |
 | Footer | Row count, selection info (count / sum / avg of a numeric range), per-column aggregates (`aggregate: "sum" | "avg" | "count" | "min" | "max"`). |
 | i18n | Every string via `sac.t()`, relabels live on `sac.lang` change; numbers/dates follow `sac.regional` live. |
 | Theming | Tokens only; light + dark; per-app `--accent`. |
@@ -232,6 +238,16 @@ question is added here with a provisional default and asked in an issue.
 | 2 | Loading default: incremental scroll or pages with a pager in the footer | `paging="scroll"`; `paging="pages"` supported |
 | 3 | Look: spreadsheet-dense with cell grid lines, or quiet like kit lists (row lines only, cell outline on the cursor) | quiet; `lines="grid"` option |
 | 4 | Phones: editable or read-only | editable through the form dialog (bottom sheet), no inline editing |
+
+**Open (provisional, from the design-for-use review of 2026-11-09).** Built
+configurable or easy to change; to be confirmed by the owner in an issue.
+
+| # | Question | Provisional default |
+|---|---|---|
+| 5 | The browser's "leave this page?" question while rows are unsaved | on; `unload-guard="off"` turns it off |
+| 6 | When a change over a range gets a toast | a change in more than one row, and any change that left something out |
+| 7 | The mode switch's labels (the review suggests "View · Edit in table · Edit in form") | unchanged: Read · Sheet · Form |
+| 8 | An edit the grid cannot make | an info toast saying why, once per reason and grid |
 
 ## 8. Quality bar
 

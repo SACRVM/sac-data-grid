@@ -180,6 +180,25 @@
             document.removeEventListener("copy", grab);
             return text;
         },
+        /** The kit toasts on screen (not the ones leaving): { kind, text, action }. */
+        toasts() {
+            const stack = document.querySelector("sac-toast-stack");
+            if (!stack || !stack.shadowRoot) return [];
+            return [...stack.shadowRoot.querySelectorAll(".toast")].filter((c) => !c._leaving).map((c) => ({
+                kind: ["info", "success", "warn", "error"].find((k) => c.classList.contains(k)) || "",
+                text: c.querySelector(".message").textContent,
+                action: c.querySelector(".action") ? c.querySelector(".action").textContent : null,
+            }));
+        },
+        /** Click the action of the newest toast whose text includes `part`. */
+        toastAction(part) {
+            const stack = document.querySelector("sac-toast-stack");
+            const cards = stack ? [...stack.shadowRoot.querySelectorAll(".toast")].filter((c) => !c._leaving) : [];
+            const card = cards.reverse().find((c) => c.querySelector(".message").textContent.includes(part));
+            if (!card || !card.querySelector(".action")) return false;
+            card.querySelector(".action").click();
+            return true;
+        },
         pasteText(text) {
             const dt = new DataTransfer();
             dt.setData("text/plain", text);

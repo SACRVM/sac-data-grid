@@ -101,11 +101,12 @@
         return prevDblClick.call(this, r, c, e);
     };
 
-    /** Phones: a tap on the cell that was already active opens the record. */
+    /** Phones: a tap on a row opens its record (the way to edit there; a
+     *  long press is the row menu). */
     const prevCellClick = P._onCellClick;
     P._onCellClick = function (r, c, wasActive) {
         if (prevCellClick) prevCellClick.call(this, r, c, wasActive);
-        if (wasActive && this._compact() && !this._editor) this._openRecord(r);
+        if (this._compact() && !this._editor) this._openRecord(r);
     };
 
     const prevModeChanged = P._onModeChanged;
@@ -221,11 +222,16 @@
             : (this._total != null || this._paging() === "pages"
                 ? t("data-grid.record-of", "Record {n} of {m}", { n: int(r + 1), m: int(rows) })
                 : t("data-grid.record", "Record {n}", { n: int(r + 1) }));
+        // Delete is here as well as in the row menu (on a phone the form is
+        // where a row is edited); it stands apart from Save, with Undo after.
+        const del = !st.readOnly ? btn("delete", "trash", t("data-grid.delete-record", "Delete"), false) : null;
+        if (del) del.classList.add("sdg-del");
         st.nav.replaceChildren(
             btn("prev", "chevron-left", t("data-grid.previous", "Previous"), r <= 0),
             btn("next", "chevron-right", t("data-grid.next", "Next"), r >= rows - 1, true),
             ...(this._formEditable() ? [btn("new", "plus", t("data-grid.new", "New"), false)] : []),
             pos,
+            ...(del ? [del] : []),
         );
 
         // Fields: every column, definition order (hidden ones too — the form
@@ -340,7 +346,7 @@
                 const s = input.value;
                 if (type.plainEditor || type.longEditor) return { value: s };
                 const v = this._parseText(col, s, row);
-                return v === undefined ? { error: t("data-grid.invalid", "Not a valid value") } : { value: v };
+                return v === undefined ? { error: this._invalidMessage(col, null) } : { value: v };
             };
             f.snap = () => input.value;
             f.restore = (s) => { input.value = s; };
@@ -499,6 +505,7 @@
     P._formNav = async function (act) {
         const st = this._formState;
         if (!st || st.busy) return;
+        if (act === "delete") { this._formDelete(); return; }
         st.busy = true;
         try {
             if (!(await this._formCommit(true))) return;
@@ -517,6 +524,18 @@
         } finally {
             st.busy = false;
         }
+    };
+
+    /** The form's Delete: closes the form (what was typed goes with the
+     *  row) and deletes the row the grid's way — sac:request-delete first,
+     *  then the Undo toast. A new record that was never saved just goes. */
+    P._formDelete = function () {
+        const st = this._formState;
+        if (!st || st.readOnly) return;
+        const id = this._idOf(st.row);
+        st.dlg.close("delete");
+        const r = this._indexOfId(id);
+        if (r >= 0) this._deleteRows([r]);
     };
 
     /** After the dialog closed. Escape or the backdrop with changes in the

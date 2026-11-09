@@ -44,19 +44,21 @@ if (saved) grid.view = saved;`)}
         <p>The grid fills the height you give it (default 420px). From the kit it uses the cell-editor
            fields, <code>sac-chip</code>, <code>sac-menu</code>, <code>sac-dialog</code>,
            <code>sac-tooltip</code> and <code>sac-segmented-control</code>; all are in
-           <code>kit/js/all.js</code>. Picking scripts by hand, add <code>kit/js/lib/motion.js</code> as well:
-           with it the record form's bottom sheet pulls down on phones (kit 2.33 and newer).</p>
+           <code>kit/js/all.js</code>. Picking scripts by hand, add <code>kit/js/lib/context-menu.js</code>
+           (without it a long press on a row opens no row menu on iOS) and <code>kit/js/lib/motion.js</code>
+           (the record form's bottom sheet pulls down on phones, kit 2.33 and newer).</p>
 
         <h2 id="attributes">Attributes</h2>
         ${table("Attribute", [
             ["label", "The grid's accessible name."],
             ["mode", "<code>read</code> · <code>sheet</code> (default) · <code>form</code>. See <a href=\"#edit-modes\">Edit modes</a>. A source without <code>save()</code> is read-only in every mode."],
-            ["save-mode", "<code>cell</code> · <code>row</code> (default) · <code>batch</code>: when changes go to <code>source.save()</code>. After each cell, when the cursor leaves the row (or focus leaves the grid), or on <code>save()</code> / the footer's Save."],
+            ["save-mode", "<code>cell</code> · <code>row</code> (default) · <code>batch</code>: when changes go to <code>source.save()</code>. After each cell, when the cursor leaves the row (or focus leaves the grid), or on <code>save()</code> / the footer's Save (beside it, Discard, which Undo takes back)."],
             ["paging", "<code>scroll</code> (default) · <code>pages</code>: incremental / virtual scrolling, or a pager in the footer."],
             ["page-size", "Rows per page for <code>paging=\"pages\"</code> (default 100)."],
             ["lines", "<code>quiet</code> (default) · <code>grid</code>: row lines only, or cell grid lines."],
             ["mode-toggle", "Presence: a Read · Sheet · Form switch in the footer."],
             ["compact-edit", "<code>form</code> (default) · <code>read</code>: on phones, edit through the record form, or read only."],
+            ["unload-guard", "<code>off</code>: no \"leave this page?\" question from the grid while rows are unsaved or saving (the host asks itself, or saves in another way). Either way, in <code>cell</code> / <code>row</code> save mode the grid saves unsaved rows when it is taken out of the page or the page hides."],
             ["row-header", "<code>marks</code> (default) · <code>numbers</code> · <code>none</code>: the column before the data. <code>marks</code> is narrow and shows only a row's state (<code>*</code> new, <code>+</code> the new line, a dot for a row with errors); <code>numbers</code> the row's position. A click selects the row; a right-click (a long press on touch) opens the row menu."],
         ])}
 
@@ -66,7 +68,7 @@ if (saved) grid.view = saved;`)}
             ["source", "The data source (<a href=\"#source\">below</a>)."],
             ["view", "<code>{ columns: { field: { width, hidden } }, sort, filter }</code>: get it to persist, set it to restore."],
             ["mode, saveMode", "Mirror the attributes."],
-            ["dirty", "Read-only: the number of rows with unsaved changes."],
+            ["dirty", "Read-only: the number of rows with unsaved changes (what <code>unload-guard</code> watches)."],
             ["reload()", "Load again, keeping scroll position and selection. Resolves when loaded."],
             ["save()", "Save every dirty row. Resolves with <code>{ saved, errors, invalid }</code>."],
             ["revert()", "Throw away every unsaved change."],
@@ -176,12 +178,16 @@ if (saved) grid.view = saved;`)}
             ["Delete / Backspace · Space", "Clear the range · toggle a bool."],
             ["Ctrl+A · Shift+Space · Ctrl+Space", "Select all · the row · the column."],
             ["Ctrl+C / X / V", "Copy / cut / paste TSV. Editing: the editor's."],
-            ["Ctrl+Z / Y · Ctrl+S", "Undo / redo (until saved) · save. Editing: the editor's undo."],
+            ["Ctrl+Z / Y · Ctrl+S", "Undo / redo · save. A saved change stays undoable (undo writes the old value back); a long text thrown away with Escape comes back. Editing: the editor's undo."],
             ["Alt+↓ · Shift+F10 / menu key", "Column menu · row menu."],
         ])}
         <p>Pasting one value fills the range. A block tiles a range that is a multiple of it, or lands at the
            cursor and extends from there; past the last row it adds rows. Cells that fail parsing or
-           validation are marked and left unchanged. The whole paste is one undo step.</p>
+           validation are marked and left unchanged, with a message that says what the column takes. The whole
+           paste is one undo step. Copy, cut, paste and clear load the rows they cover first. A change over
+           several rows shows a toast with Undo; anything left out (past the end of a page, past the last
+           column, read-only columns, invalid text) is named there, never dropped silently. A copy that fails
+           says so.</p>
         <p>Copy writes the cells as text: the labels of <code>select</code> and <code>tags</code>, a long text in
            full, numbers without grouping, <code>TRUE</code> / <code>FALSE</code>. Paste reads text back by the kit's
            <code>sac.regional</code> rules, the same as the kit's fields: a date in the regional day / month order
@@ -192,16 +198,17 @@ if (saved) grid.view = saved;`)}
         <p>A click sorts, Shift+click adds a key. The sort mark sits above the title for ascending and below
            it for descending, with the key's number when there are several. Nothing sits beside the title,
            so it always lines up with its column's values. A right-click (a long press on touch, Alt+↓)
-           opens the column menu: sort, filter, hide and show columns. A filtered column's title turns the
-           accent colour with a dotted underline.</p>
+           opens the column menu: sort, add to the sort, filter, hide and show columns; a header's tooltip says
+           so. A filtered column's title turns the accent colour with a dotted underline, and the status line
+           names every active filter, a hidden column's too (a name opens its filter), with Clear filters.</p>
 
         <h2 id="edit-modes">Edit modes</h2>
         ${table("Mode", [
             ["read", "Selection, copy, sort and filter; no editing affordances. Enter opens the record read-only."],
-            ["sheet", "Inline editing with the kit's cell editors, range operations, the \"new row\" line at the end, and the row menu (right-click, a long press on touch, Shift+F10) with Open record, New row and Delete."],
-            ["form", "The list stays read-only; Enter, a double-click or Open record edits a row in a <code>&lt;sac-dialog&gt;</code>: every column with its label, validation, Save / Cancel, Previous / Next, New. The form commits one record (one <code>changes</code> entry). Escape with unsaved changes asks first."],
+            ["sheet", "Inline editing with the kit's cell editors, range operations, the \"new row\" line at the end, and the row menu (right-click, a long press on touch, Shift+F10) with Open record, New row, Delete or Restore, Undo and Redo. A long text edits in a popover: Enter is a new line, Done (Ctrl+Enter) or Cancel (Esc) finish."],
+            ["form", "The list stays read-only; Enter, a double-click or Open record edits a row in a <code>&lt;sac-dialog&gt;</code>: every column with its label, validation, Save / Cancel, Previous / Next, New, Delete. The form commits one record (one <code>changes</code> entry), and saves nothing while a kit field holds text it cannot take (kit 2.36 and newer). Escape with unsaved changes asks first."],
         ])}
-        ${compact("no inline editing in the kit's compact viewport. The record form, a bottom sheet, is the way to edit (Enter, or a tap on the active cell); <code>compact-edit=\"read\"</code> makes the grid read-only there instead. Touch targets are 44 px under a coarse pointer.")}
+        ${compact("no inline editing in the kit's compact viewport. The record form, a bottom sheet, is the way to edit (Enter, or a tap on a row); <code>compact-edit=\"read\"</code> makes the grid read-only there instead. Touch targets are 44 px under a coarse pointer.")}
 
         <h2 id="look">Language, formats, look</h2>
         <p>Every string goes through <code>sac.t()</code>; <code>sac-data-grid.de.js</code> adds German. The grid
